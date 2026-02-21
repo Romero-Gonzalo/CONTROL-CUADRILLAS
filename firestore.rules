@@ -1,0 +1,53 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function userDoc() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function isAuditor() {
+      return signedIn() && userDoc().role == "AUDITOR";
+    }
+
+    function isInstaller() {
+      return signedIn() && userDoc().role == "INSTALLER";
+    }
+
+    function mySquadId() {
+      return userDoc().squadId;
+    }
+
+    // USERS: cada uno puede leer su perfil; auditor puede leer todos
+    match /users/{uid} {
+      allow read: if signedIn() && (request.auth.uid == uid || isAuditor());
+      allow write: if isAuditor(); // solo auditor/admin puede modificar perfiles
+    }
+
+    // SQUADS: todos los autenticados leen; solo auditor escribe
+    match /squads/{squadId} {
+      allow read: if signedIn();
+      allow write: if isAuditor();
+    }
+
+    // INSTALLATIONS:
+    match /installations/{docId} {
+
+      // leer: auditor ve todo; instalador solo su cuadrilla
+      allow read: if isAuditor()
+        || (isInstaller() && resource.data.squadId == mySquadId());
+
+      // crear: instalador solo puede crear con su squadId y su uid
+      allow create: if isInstaller()
+        && request.resource.data.squadId == mySquadId()
+        && request.resource.data.createdBy == request.auth.uid;
+
+      // por ahora: instaladores NO editan ni borran (evita “ajustes creativos”)
+      allow update, delete: if isAuditor();
+    }
+  }
+}
