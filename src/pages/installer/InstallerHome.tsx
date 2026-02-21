@@ -3,7 +3,13 @@ import { signOut } from "firebase/auth";
 import { auth } from "../../lib/firebase";
 import { useAuth } from "../../app/AuthProvider";
 import { createInstallation } from "../../services/installations.service";
-import { collection, query, where, orderBy, onSnapshot } from "firebase/firestore";
+import {
+  collection,
+  query,
+  where,
+  orderBy,
+  onSnapshot,
+} from "firebase/firestore";
 import { db } from "../../lib/firebase";
 import { getDayKey } from "../../utils/dayKey";
 
@@ -40,7 +46,7 @@ export default function InstallerHome() {
       collection(db, "installations"),
       where("squadId", "==", profile.squadId),
       where("dayKey", "==", getDayKey()),
-      orderBy("createdAt", "desc")
+      orderBy("createdAt", "desc"),
     );
 
     const unsub = onSnapshot(q, (snap) => {
@@ -83,10 +89,15 @@ export default function InstallerHome() {
   }
 
   return (
-    <div className="p-6 space-y-6 max-w-3xl mx-auto">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold">{profile?.displayName}</h1>
-        <button className="px-3 py-2 rounded-xl border" onClick={() => signOut(auth)}>
+    <div className="px-4 py-4 sm:p-6 space-y-4 sm:space-y-6 max-w-3xl mx-auto">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <h1 className="text-xl sm:text-2xl font-bold leading-tight">
+          {profile?.displayName}
+        </h1>
+        <button
+          className="w-full sm:w-auto px-3 py-2 rounded-xl border"
+          onClick={() => signOut(auth)}
+        >
           Salir
         </button>
       </div>
@@ -122,7 +133,7 @@ export default function InstallerHome() {
 
         <button
           disabled={saving}
-          className="rounded-xl bg-black text-white px-4 py-2 font-medium disabled:opacity-50"
+          className="w-full sm:w-auto rounded-xl bg-black text-white px-4 py-2 font-medium disabled:opacity-50"
         >
           {saving ? "Guardando..." : "Guardar"}
         </button>
@@ -132,37 +143,47 @@ export default function InstallerHome() {
         <h2 className="font-semibold mb-3">Instalaciones de hoy</h2>
 
         {items.length === 0 ? (
-          <p className="text-sm text-gray-500">Todavía no hay instalaciones cargadas.</p>
+          <p className="text-sm text-gray-500">
+            Todavía no hay instalaciones cargadas.
+          </p>
         ) : (
           <ul className="space-y-2">
-           {items.map((it, idx) => {
-  const next = items[idx + 1]; // "anterior" en el tiempo (porque está DESC)
-  const t1 = it.createdAt?.toDate?.() as Date | undefined;
-  const t0 = next?.createdAt?.toDate?.() as Date | undefined;
+            {items.map((it, idx) => {
+              const next = items[idx + 1]; // "anterior" en el tiempo (porque está DESC)
+              const t1 = it.createdAt?.toDate?.() as Date | undefined;
+              const t0 = next?.createdAt?.toDate?.() as Date | undefined;
 
-  let gapText = "";
-  if (t1 && t0) {
-    const diffMin = Math.max(0, Math.round((t1.getTime() - t0.getTime()) / 60000));
-    gapText = fmtGapMinutes(diffMin);
-  }
+              let gapText = "";
+              if (t1 && t0) {
+                const diffMin = Math.max(
+                  0,
+                  Math.round((t1.getTime() - t0.getTime()) / 60000),
+                );
+                gapText = fmtGapMinutes(diffMin);
+              }
 
-  return (
-    <li key={it.id} className="text-sm border rounded-xl p-3">
-      <div className="flex items-center justify-between gap-3">
-        <div className="font-medium">{it.idInstalacion}</div>
-        <div className="text-xs text-gray-500">{fmtTime(it.createdAt)}</div>
-      </div>
+              return (
+                <li key={it.id} className="text-sm border rounded-xl p-3">
+                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 sm:gap-3">
+                    <div className="font-medium">{it.idInstalacion}</div>
+                    <div className="text-xs text-gray-500">
+                      {fmtTime(it.createdAt)}
+                    </div>
+                  </div>
 
-      {it.observaciones && <div className="text-gray-600 mt-1">{it.observaciones}</div>}
+                  {it.observaciones && (
+                    <div className="text-gray-600 mt-1">{it.observaciones}</div>
+                  )}
 
-      {gapText && (
-        <div className="mt-2 text-xs text-gray-700 bg-gray-50 border rounded-lg px-2 py-1 inline-block">
-          Tiempo desde la anterior: <span className="font-medium">{gapText}</span>
-        </div>
-      )}
-    </li>
-  );
-})}
+                  {gapText && (
+                    <div className="mt-2 text-xs text-gray-700 bg-gray-50 border rounded-lg px-2 py-1 inline-block">
+                      Tiempo desde la anterior:{" "}
+                      <span className="font-medium">{gapText}</span>
+                    </div>
+                  )}
+                </li>
+              );
+            })}
           </ul>
         )}
       </div>
