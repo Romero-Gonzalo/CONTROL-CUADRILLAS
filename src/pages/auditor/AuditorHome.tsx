@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { signOut } from "firebase/auth";
 import { auth, db } from "../../lib/firebase";
 import { useAuth } from "../../app/AuthProvider";
@@ -96,6 +96,12 @@ export default function AuditorHome() {
   // Fecha para filtrar
   const [dayInput, setDayInput] = useState(() => getDayKey());
   const [searchId, setSearchId] = useState("");
+  const [pendingScrollInstallationId, setPendingScrollInstallationId] =
+    useState<string | null>(null);
+  const [highlightedInstallationId, setHighlightedInstallationId] = useState<
+    string | null
+  >(null);
+  const installationRefs = useRef<Record<string, HTMLLIElement | null>>({});
 
   const dayKey = useMemo(() => toDayKeyFromInput(dayInput), [dayInput]);
   const searchResult = useMemo(() => {
@@ -207,6 +213,34 @@ export default function AuditorHome() {
     const s = squads.find((x) => x.id === selectedSquadId);
     return s?.name ?? selectedSquadId ?? "";
   }, [squads, selectedSquadId]);
+
+  useEffect(() => {
+    if (!pendingScrollInstallationId) return;
+
+    const target = installationRefs.current[pendingScrollInstallationId];
+    if (!target) return;
+
+    target.scrollIntoView({ behavior: "smooth", block: "center" });
+    setHighlightedInstallationId(pendingScrollInstallationId);
+    setPendingScrollInstallationId(null);
+  }, [pendingScrollInstallationId, selectedList]);
+
+  useEffect(() => {
+    if (!highlightedInstallationId) return;
+
+    const timeoutId = window.setTimeout(() => {
+      setHighlightedInstallationId(null);
+    }, 1800);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [highlightedInstallationId]);
+
+  const goToInstallationSquad = () => {
+    if (!searchResult) return;
+    setSelectedSquadId(searchResult.squadId);
+    setPendingScrollInstallationId(searchResult.id);
+  };
+
   const exportCsv = () => {
     const squadNameById: Record<string, string> = {};
     for (const s of squads) squadNameById[s.id] = s.name;
@@ -300,6 +334,14 @@ export default function AuditorHome() {
                   <div className="text-sm text-gray-700">
                     Hora: {fmtTime(searchResult.createdAt)}
                   </div>
+
+                  <button
+                    type="button"
+                    onClick={goToInstallationSquad}
+                    className="mt-2 px-3 py-1.5 rounded-lg border bg-white text-sm font-medium"
+                  >
+                    Ir a cuadrilla
+                  </button>
 
                   {searchResult.observaciones && (
                     <div className="text-sm text-gray-600 mt-1">
@@ -495,7 +537,18 @@ export default function AuditorHome() {
                 }
 
                 return (
-                  <li key={it.id} className="text-sm border rounded-xl p-3">
+                  <li
+                    key={it.id}
+                    ref={(node) => {
+                      installationRefs.current[it.id] = node;
+                    }}
+                    className={[
+                      "text-sm border rounded-xl p-3 transition-colors",
+                      highlightedInstallationId === it.id
+                        ? "bg-blue-50 border-blue-300"
+                        : "",
+                    ].join(" ")}
+                  >
                     <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 sm:gap-3">
                       <div className="font-medium">{it.idInstalacion}</div>
                       <div className="text-xs text-gray-500">
