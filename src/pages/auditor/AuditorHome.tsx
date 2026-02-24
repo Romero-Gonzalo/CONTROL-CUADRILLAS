@@ -18,9 +18,17 @@ type InstallationItem = {
   squadId: string;
   createdAt?: any; // Timestamp
 };
+
+type AlertLevel = "all" | "normal" | "delay" | "critical";
+
+function getAlertLevel(diffMin: number): Exclude<AlertLevel, "all"> {
+  if (diffMin >= 120) return "critical";
+  if (diffMin >= 60) return "delay";
+  return "normal";
+}
+
 function escCsv(value: any) {
   const s = String(value ?? "");
-  // Escapa comillas y encierra en comillas si hay separadores o saltos
   const needsQuotes = /[",\n;]/.test(s);
   const safe = s.replace(/"/g, '""');
   return needsQuotes ? `"${safe}"` : safe;
@@ -41,6 +49,7 @@ function downloadTextFile(
   a.remove();
   URL.revokeObjectURL(url);
 }
+
 function fmtTime(ts: any) {
   if (!ts?.toDate) return "";
   const d = ts.toDate() as Date;
@@ -53,8 +62,8 @@ function fmtGapMinutes(min: number) {
   const m = min % 60;
   return m === 0 ? `${h} h` : `${h} h ${m} min`;
 }
+
 function calcGapsDesc(list: InstallationItem[]) {
-  // list viene ordenada DESC (más nueva primero)
   const gapsMin: number[] = [];
 
   for (let i = 0; i < list.length - 1; i++) {
@@ -82,10 +91,11 @@ function max(nums: number[]) {
   if (nums.length === 0) return 0;
   return nums.reduce((m, v) => (v > m ? v : m), nums[0]);
 }
+
 function toDayKeyFromInput(value: string) {
-  // value: "YYYY-MM-DD" desde <input type="date">
   return value;
 }
+
 export default function AuditorHome() {
   const { profile } = useAuth();
 
@@ -93,17 +103,20 @@ export default function AuditorHome() {
   const [installations, setInstallations] = useState<InstallationItem[]>([]);
   const [selectedSquadId, setSelectedSquadId] = useState<string | null>(null);
 
-  // Fecha para filtrar
   const [dayInput, setDayInput] = useState(() => getDayKey());
   const [searchId, setSearchId] = useState("");
+  const [alertFilter, setAlertFilter] = useState<AlertLevel>("all");
+
   const [pendingScrollInstallationId, setPendingScrollInstallationId] =
     useState<string | null>(null);
   const [highlightedInstallationId, setHighlightedInstallationId] = useState<
     string | null
   >(null);
+
   const installationRefs = useRef<Record<string, HTMLLIElement | null>>({});
 
   const dayKey = useMemo(() => toDayKeyFromInput(dayInput), [dayInput]);
+
   const searchResult = useMemo(() => {
     const q = searchId.trim().toLowerCase();
     if (!q) return null;
@@ -112,7 +125,7 @@ export default function AuditorHome() {
       installations.find((it) => it.idInstalacion?.toLowerCase() === q) ?? null
     );
   }, [searchId, installations]);
-  // 1) Traer cuadrillas
+
   useEffect(() => {
     const q = query(collection(db, "squads"), where("active", "==", true));
     const unsub = onSnapshot(
@@ -122,11 +135,10 @@ export default function AuditorHome() {
           id: d.id,
           ...(d.data() as any),
         })) as Squad[];
-        // orden Q01..Q99
+
         rows.sort((a, b) => a.id.localeCompare(b.id));
         setSquads(rows);
 
-        // si no hay seleccionada, elegimos la primera
         if (!selectedSquadId && rows.length > 0) setSelectedSquadId(rows[0].id);
       },
       (err) => console.error(err),
@@ -136,12 +148,12 @@ export default function AuditorHome() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // 2) Traer instalaciones del día (todas)
   useEffect(() => {
     const q = query(
       collection(db, "installations"),
       where("dayKey", "==", dayKey),
     );
+
     const unsub = onSnapshot(
       q,
       (snap) => {
@@ -163,9 +175,8 @@ export default function AuditorHome() {
 
     return () => unsub();
   }, [dayKey]);
-  // Conteo por cuadrilla
+
   const squadStats = useMemo(() => {
-    // agrupamos por cuadrilla (y listamos DESC ya)
     const groups: Record<string, InstallationItem[]> = {};
     for (const it of installations) {
       (groups[it.squadId] ??= []).push(it);
@@ -194,7 +205,7 @@ export default function AuditorHome() {
       const gaps = calcGapsDesc(list);
       stats[sid] = {
         count: list.length,
-        lastAt: list[0]?.createdAt ?? null, // como está DESC, el primero es el más nuevo
+        lastAt: list[0]?.createdAt ?? null,
         avgGapMin: avg(gaps),
         maxGapMin: max(gaps),
       };
@@ -203,7 +214,6 @@ export default function AuditorHome() {
     return stats;
   }, [installations]);
 
-  // Instalaciones de la cuadrilla seleccionada (ordenadas DESC ya)
   const selectedList = useMemo(() => {
     if (!selectedSquadId) return [];
     return installations.filter((x) => x.squadId === selectedSquadId);
@@ -213,6 +223,34 @@ export default function AuditorHome() {
     const s = squads.find((x) => x.id === selectedSquadId);
     return s?.name ?? selectedSquadId ?? "";
   }, [squads, selectedSquadId]);
+
+  const selectedItemsWithGap = useMemo(() => {
+    return selectedList.map((it, idx) => {
+      const next = selectedList[idx + 1];
+      const t1 = it.createdAt?.toDate?.() as Date | undefined;
+      const t0 = next?.createdAt?.toDate?.() as Date | undefined;
+
+      let diffMin = 0;
+      let gapText = "";
+
+      if (t1 && t0) {
+        diffMin = Math.max(0, Math.round((t1.getTime() - t0.getTime()) / 60000));
+        gapText = fmtGapMinutes(diffMin);
+      }
+
+      return {
+        it,
+        diffMin,
+        gapText,
+        level: getAlertLevel(diffMin),
+      };
+    });
+  }, [selectedList]);
+
+  const filteredSelectedItems = useMemo(() => {
+    if (alertFilter === "all") return selectedItemsWithGap;
+    return selectedItemsWithGap.filter((row) => row.level === alertFilter);
+  }, [alertFilter, selectedItemsWithGap]);
 
   useEffect(() => {
     if (!pendingScrollInstallationId) return;
@@ -241,6 +279,13 @@ export default function AuditorHome() {
     setPendingScrollInstallationId(searchResult.id);
   };
 
+  const filterButtons: Array<{ id: AlertLevel; label: string }> = [
+    { id: "all", label: "Todas" },
+    { id: "normal", label: "Sin demora" },
+    { id: "delay", label: "Demora" },
+    { id: "critical", label: "Demora fuerte" },
+  ];
+
   const exportCsv = () => {
     const squadNameById: Record<string, string> = {};
     for (const s of squads) squadNameById[s.id] = s.name;
@@ -262,8 +307,7 @@ export default function AuditorHome() {
     ];
 
     const lastTimeBySquad: Record<string, number> = {};
-    const lines: string[] = [];
-    lines.push(header.join(";"));
+    const lines: string[] = [header.join(";")];
 
     for (const it of rows) {
       const squadId = it.squadId ?? "";
@@ -285,26 +329,27 @@ export default function AuditorHome() {
         lastTimeBySquad[squadId] = d.getTime();
       }
 
-      const line = [
-        escCsv(dayKey),
-        escCsv(squadId),
-        escCsv(squadName),
-        escCsv(timeStr),
-        escCsv(it.idInstalacion),
-        escCsv(it.observaciones),
-        escCsv(gapMin),
-      ].join(";");
-
-      lines.push(line);
+      lines.push(
+        [
+          escCsv(dayKey),
+          escCsv(squadId),
+          escCsv(squadName),
+          escCsv(timeStr),
+          escCsv(it.idInstalacion),
+          escCsv(it.observaciones),
+          escCsv(gapMin),
+        ].join(";"),
+      );
     }
 
     const filename = `IPT_instalaciones_${dayKey}.csv`;
     downloadTextFile(filename, lines.join("\n"));
   };
+
   return (
     <div className="px-4 py-4 sm:p-6 space-y-4 sm:space-y-6 max-w-6xl mx-auto">
-      <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_auto_auto] gap-3 items-start">
-        <div className="rounded-2xl border p-4">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 items-stretch">
+        <div className="rounded-2xl border p-4 lg:col-span-2">
           <div className="text-sm font-medium mb-2">Buscar instalación</div>
 
           <input
@@ -357,41 +402,76 @@ export default function AuditorHome() {
             </div>
           )}
         </div>
-        <div>
+
+        <div className="rounded-2xl border p-4 flex flex-col gap-3">
           <h1 className="text-xl sm:text-2xl font-bold leading-tight">
             {profile?.displayName ?? "Auditor"}
           </h1>
           <p className="text-sm text-gray-500">Panel diario por cuadrilla</p>
-        </div>
 
-        <div className="w-full lg:w-auto">
           <input
             type="date"
             className="w-full border rounded-xl px-3 py-2 text-sm"
             value={dayInput}
             onChange={(e) => setDayInput(e.target.value)}
           />
-        </div>
 
-        <div className="grid grid-cols-2 gap-2 w-full lg:w-auto">
           <button
+            type="button"
             className="px-3 py-2 rounded-xl border text-sm"
             onClick={exportCsv}
             title="Exporta todas las instalaciones del día a CSV"
           >
             Exportar CSV
           </button>
-
-          <button
-            className="px-3 py-2 rounded-xl border text-sm"
-            onClick={() => signOut(auth)}
-          >
-            Salir
-          </button>
         </div>
       </div>
 
-      {/* Resumen */}
+      <div className="overflow-x-auto -mx-1 px-1">
+        <div className="flex gap-2 min-w-max">
+          {filterButtons.map((fb) => {
+            const active = fb.id === alertFilter;
+            return (
+              <button
+                key={fb.id}
+                type="button"
+                onClick={() => setAlertFilter(fb.id)}
+                className={[
+                  "px-3 py-1.5 rounded-full text-sm border whitespace-nowrap",
+                  active ? "bg-black text-white border-black" : "bg-white",
+                ].join(" ")}
+              >
+                {fb.label}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+        <button
+          type="button"
+          className="px-3 py-2 rounded-xl border text-sm"
+          onClick={() => setAlertFilter("all")}
+        >
+          Limpiar filtro
+        </button>
+        <button
+          type="button"
+          className="px-3 py-2 rounded-xl border text-sm"
+          onClick={() => setSearchId("")}
+        >
+          Limpiar búsqueda
+        </button>
+        <button
+          type="button"
+          className="px-3 py-2 rounded-xl border text-sm col-span-2 sm:col-span-1"
+          onClick={() => signOut(auth)}
+        >
+          Salir
+        </button>
+      </div>
+
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
         <div className="rounded-2xl border p-4">
           <div className="text-sm text-gray-500">Fecha</div>
@@ -408,7 +488,6 @@ export default function AuditorHome() {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Lista cuadrillas */}
         <div className="rounded-2xl border p-4">
           <h2 className="font-semibold mb-3">Cuadrillas</h2>
 
@@ -421,6 +500,7 @@ export default function AuditorHome() {
                 maxGapMin: 0,
               };
               const active = selectedSquadId === s.id;
+
               return (
                 <button
                   key={s.id}
@@ -434,9 +514,7 @@ export default function AuditorHome() {
                     <div className="font-medium">{s.name}</div>
                     <div
                       className={
-                        active
-                          ? "text-white/70 text-xs"
-                          : "text-gray-500 text-xs"
+                        active ? "text-white/70 text-xs" : "text-gray-500 text-xs"
                       }
                     >
                       ID: {s.id}
@@ -450,34 +528,26 @@ export default function AuditorHome() {
                         : "text-left sm:text-right"
                     }
                   >
-                    <div
-                      className={active ? "text-white font-bold" : "font-bold"}
-                    >
+                    <div className={active ? "text-white font-bold" : "font-bold"}>
                       {st.count}
                     </div>
                     <div
                       className={
-                        active
-                          ? "text-white/70 text-xs"
-                          : "text-gray-500 text-xs"
+                        active ? "text-white/70 text-xs" : "text-gray-500 text-xs"
                       }
                     >
                       prom: {st.avgGapMin ? fmtGapMinutes(st.avgGapMin) : "-"}
                     </div>
                     <div
                       className={
-                        active
-                          ? "text-white/70 text-xs"
-                          : "text-gray-500 text-xs"
+                        active ? "text-white/70 text-xs" : "text-gray-500 text-xs"
                       }
                     >
                       max: {st.maxGapMin ? fmtGapMinutes(st.maxGapMin) : "-"}
                     </div>
                     <div
                       className={
-                        active
-                          ? "text-white/70 text-xs"
-                          : "text-gray-500 text-xs"
+                        active ? "text-white/70 text-xs" : "text-gray-500 text-xs"
                       }
                     >
                       últ: {st.lastAt ? fmtTime(st.lastAt) : "-"}
@@ -489,7 +559,6 @@ export default function AuditorHome() {
           </div>
         </div>
 
-        {/* Detalle cuadrilla */}
         <div className="rounded-2xl border p-4 lg:col-span-2">
           <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3 mb-3">
             <div>
@@ -498,33 +567,18 @@ export default function AuditorHome() {
               </h2>
               <p className="text-sm text-gray-500">
                 Instalaciones:{" "}
-                <span className="font-medium">{selectedList.length}</span>
+                <span className="font-medium">{filteredSelectedItems.length}</span>
               </p>
             </div>
           </div>
 
-          {selectedSquadId && selectedList.length === 0 ? (
+          {selectedSquadId && filteredSelectedItems.length === 0 ? (
             <p className="text-sm text-gray-500">
-              No hay instalaciones para esta cuadrilla en la fecha elegida.
+              No hay instalaciones para esta cuadrilla con el filtro elegido.
             </p>
           ) : (
             <ul className="space-y-2">
-              {selectedList.map((it, idx) => {
-                const next = selectedList[idx + 1]; // anterior en el tiempo
-                const t1 = it.createdAt?.toDate?.() as Date | undefined;
-                const t0 = next?.createdAt?.toDate?.() as Date | undefined;
-
-                let diffMin = 0;
-                let gapText = "";
-
-                if (t1 && t0) {
-                  diffMin = Math.max(
-                    0,
-                    Math.round((t1.getTime() - t0.getTime()) / 60000),
-                  );
-                  gapText = fmtGapMinutes(diffMin);
-                }
-
+              {filteredSelectedItems.map(({ it, diffMin, gapText }) => {
                 let alertLabel = "";
                 let alertClass = "";
 
@@ -557,9 +611,7 @@ export default function AuditorHome() {
                     </div>
 
                     {it.observaciones && (
-                      <div className="text-gray-600 mt-1">
-                        {it.observaciones}
-                      </div>
+                      <div className="text-gray-600 mt-1">{it.observaciones}</div>
                     )}
 
                     {gapText && (

@@ -94,6 +94,7 @@ export default function InstallerHome() {
         <h1 className="text-xl sm:text-2xl font-bold leading-tight">
           {profile?.displayName}
         </h1>
+        
         <button
           className="w-full sm:w-auto px-3 py-2 rounded-xl border"
           onClick={() => signOut(auth)}
