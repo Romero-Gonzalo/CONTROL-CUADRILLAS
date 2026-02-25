@@ -6,7 +6,7 @@ import { collection, onSnapshot, query, where } from "firebase/firestore";
 import { getDayKey } from "../../utils/dayKey";
 
 type Squad = {
-  id: string; // Q01, Q02...
+  id: string;
   name: string;
   active: boolean;
 };
@@ -16,7 +16,7 @@ type InstallationItem = {
   idInstalacion: string;
   observaciones: string;
   squadId: string;
-  createdAt?: any; // Timestamp
+  createdAt?: any;
 };
 
 type AlertLevel = "all" | "normal" | "delay" | "critical";
@@ -25,6 +25,10 @@ function getAlertLevel(diffMin: number): Exclude<AlertLevel, "all"> {
   if (diffMin >= 120) return "critical";
   if (diffMin >= 60) return "delay";
   return "normal";
+}
+
+function normalizeInstallationId(value: string) {
+  return value.toLowerCase().replace(/[\s_-]/g, "");
 }
 
 function escCsv(value: any) {
@@ -92,10 +96,6 @@ function max(nums: number[]) {
   return nums.reduce((m, v) => (v > m ? v : m), nums[0]);
 }
 
-function toDayKeyFromInput(value: string) {
-  return value;
-}
-
 export default function AuditorHome() {
   const { profile } = useAuth();
 
@@ -115,16 +115,35 @@ export default function AuditorHome() {
 
   const installationRefs = useRef<Record<string, HTMLLIElement | null>>({});
 
-  const dayKey = useMemo(() => toDayKeyFromInput(dayInput), [dayInput]);
+  const dayKey = useMemo(() => dayInput, [dayInput]);
+
+  const normalizedSearch = useMemo(
+    () => normalizeInstallationId(searchId.trim()),
+    [searchId],
+  );
+
+  const matchedInstallations = useMemo(() => {
+    if (!normalizedSearch) return [];
+
+    return installations.filter((it) =>
+      normalizeInstallationId(it.idInstalacion ?? "").includes(normalizedSearch),
+    );
+  }, [installations, normalizedSearch]);
 
   const searchResult = useMemo(() => {
-    const q = searchId.trim().toLowerCase();
-    if (!q) return null;
+    if (!normalizedSearch) return null;
 
-    return (
-      installations.find((it) => it.idInstalacion?.toLowerCase() === q) ?? null
+    const exact = matchedInstallations.find(
+      (it) => normalizeInstallationId(it.idInstalacion ?? "") === normalizedSearch,
     );
-  }, [searchId, installations]);
+
+    return exact ?? matchedInstallations[0] ?? null;
+  }, [matchedInstallations, normalizedSearch]);
+
+  const searchSuggestions = useMemo(
+    () => matchedInstallations.slice(0, 5),
+    [matchedInstallations],
+  );
 
   useEffect(() => {
     const q = query(collection(db, "squads"), where("active", "==", true));
@@ -178,9 +197,7 @@ export default function AuditorHome() {
 
   const squadStats = useMemo(() => {
     const groups: Record<string, InstallationItem[]> = {};
-    for (const it of installations) {
-      (groups[it.squadId] ??= []).push(it);
-    }
+    for (const it of installations) (groups[it.squadId] ??= []).push(it);
 
     for (const sid of Object.keys(groups)) {
       groups[sid].sort((a, b) => {
@@ -192,12 +209,7 @@ export default function AuditorHome() {
 
     const stats: Record<
       string,
-      {
-        count: number;
-        lastAt: any | null;
-        avgGapMin: number;
-        maxGapMin: number;
-      }
+      { count: number; lastAt: any | null; avgGapMin: number; maxGapMin: number }
     > = {};
 
     for (const sid of Object.keys(groups)) {
@@ -224,28 +236,28 @@ export default function AuditorHome() {
     return s?.name ?? selectedSquadId ?? "";
   }, [squads, selectedSquadId]);
 
-  const selectedItemsWithGap = useMemo(() => {
-    return selectedList.map((it, idx) => {
-      const next = selectedList[idx + 1];
-      const t1 = it.createdAt?.toDate?.() as Date | undefined;
-      const t0 = next?.createdAt?.toDate?.() as Date | undefined;
+  const selectedItemsWithGap = useMemo(
+    () =>
+      selectedList.map((it, idx) => {
+        const next = selectedList[idx + 1];
+        const t1 = it.createdAt?.toDate?.() as Date | undefined;
+        const t0 = next?.createdAt?.toDate?.() as Date | undefined;
 
-      let diffMin = 0;
-      let gapText = "";
+        let diffMin = 0;
+        let gapText = "";
 
-      if (t1 && t0) {
-        diffMin = Math.max(0, Math.round((t1.getTime() - t0.getTime()) / 60000));
-        gapText = fmtGapMinutes(diffMin);
-      }
+        if (t1 && t0) {
+          diffMin = Math.max(
+            0,
+            Math.round((t1.getTime() - t0.getTime()) / 60000),
+          );
+          gapText = fmtGapMinutes(diffMin);
+        }
 
-      return {
-        it,
-        diffMin,
-        gapText,
-        level: getAlertLevel(diffMin),
-      };
-    });
-  }, [selectedList]);
+        return { it, diffMin, gapText, level: getAlertLevel(diffMin) };
+      }),
+    [selectedList],
+  );
 
   const filteredSelectedItems = useMemo(() => {
     if (alertFilter === "all") return selectedItemsWithGap;
@@ -273,10 +285,9 @@ export default function AuditorHome() {
     return () => window.clearTimeout(timeoutId);
   }, [highlightedInstallationId]);
 
-  const goToInstallationSquad = () => {
-    if (!searchResult) return;
-    setSelectedSquadId(searchResult.squadId);
-    setPendingScrollInstallationId(searchResult.id);
+  const goToInstallationSquad = (item: InstallationItem) => {
+    setSelectedSquadId(item.squadId);
+    setPendingScrollInstallationId(item.id);
   };
 
   const filterButtons: Array<{ id: AlertLevel; label: string }> = [
@@ -342,14 +353,13 @@ export default function AuditorHome() {
       );
     }
 
-    const filename = `IPT_instalaciones_${dayKey}.csv`;
-    downloadTextFile(filename, lines.join("\n"));
+    downloadTextFile(`IPT_instalaciones_${dayKey}.csv`, lines.join("\n"));
   };
 
   return (
-    <div className="px-4 py-4 sm:p-6 space-y-4 sm:space-y-6 max-w-6xl mx-auto">
+    <div className="px-4 py-4 pb-24 sm:pb-6 sm:p-6 space-y-4 sm:space-y-6 max-w-6xl mx-auto">
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 items-stretch">
-        <div className="rounded-2xl border p-4 lg:col-span-2">
+        <div className="rounded-2xl border p-3 sm:p-4 lg:col-span-2">
           <div className="text-sm font-medium mb-2">Buscar instalación</div>
 
           <input
@@ -361,52 +371,57 @@ export default function AuditorHome() {
           />
 
           {searchId && (
-            <div className="mt-3">
+            <div className="mt-3 space-y-2">
               {searchResult ? (
                 <div className="border rounded-xl p-3 bg-green-50">
-                  <div className="font-medium">
+                  <div className="font-medium text-sm sm:text-base">
                     Instalación {searchResult.idInstalacion}
                   </div>
-
                   <div className="text-sm text-gray-700">
-                    Cuadrilla:{" "}
-                    <span className="font-medium">
-                      {squads.find((s) => s.id === searchResult.squadId)
-                        ?.name ?? searchResult.squadId}
-                    </span>
+                    Cuadrilla: {squads.find((s) => s.id === searchResult.squadId)?.name ?? searchResult.squadId}
                   </div>
-
-                  <div className="text-sm text-gray-700">
-                    Hora: {fmtTime(searchResult.createdAt)}
-                  </div>
+                  <div className="text-sm text-gray-700">Hora: {fmtTime(searchResult.createdAt)}</div>
 
                   <button
                     type="button"
-                    onClick={goToInstallationSquad}
+                    onClick={() => goToInstallationSquad(searchResult)}
                     className="mt-2 px-3 py-1.5 rounded-lg border bg-white text-sm font-medium"
                   >
                     Ir a cuadrilla
                   </button>
 
                   {searchResult.observaciones && (
-                    <div className="text-sm text-gray-600 mt-1">
-                      Obs: {searchResult.observaciones}
-                    </div>
+                    <div className="text-sm text-gray-600 mt-1">Obs: {searchResult.observaciones}</div>
                   )}
                 </div>
               ) : (
-                <div className="text-sm text-gray-500">
-                  No se encontró ninguna instalación con ese ID.
+                <div className="text-sm text-gray-500">No se encontraron instalaciones para ese texto.</div>
+              )}
+
+              {searchSuggestions.length > 1 && (
+                <div className="rounded-xl border p-2">
+                  <div className="text-xs text-gray-500 mb-2">Sugerencias</div>
+                  <div className="space-y-1">
+                    {searchSuggestions.map((it) => (
+                      <button
+                        key={it.id}
+                        type="button"
+                        onClick={() => goToInstallationSquad(it)}
+                        className="w-full text-left px-2 py-1.5 rounded-lg hover:bg-gray-50 text-sm flex items-center justify-between"
+                      >
+                        <span className="font-medium">{it.idInstalacion}</span>
+                        <span className="text-xs text-gray-500">{fmtTime(it.createdAt)}</span>
+                      </button>
+                    ))}
+                  </div>
                 </div>
               )}
             </div>
           )}
         </div>
 
-        <div className="rounded-2xl border p-4 flex flex-col gap-3">
-          <h1 className="text-xl sm:text-2xl font-bold leading-tight">
-            {profile?.displayName ?? "Auditor"}
-          </h1>
+        <div className="rounded-2xl border p-3 sm:p-4 flex flex-col gap-3">
+          <h1 className="text-lg sm:text-2xl font-bold leading-tight">{profile?.displayName ?? "Auditor"}</h1>
           <p className="text-sm text-gray-500">Panel diario por cuadrilla</p>
 
           <input
@@ -418,7 +433,7 @@ export default function AuditorHome() {
 
           <button
             type="button"
-            className="px-3 py-2 rounded-xl border text-sm"
+            className="hidden sm:block px-3 py-2 rounded-xl border text-sm"
             onClick={exportCsv}
             title="Exporta todas las instalaciones del día a CSV"
           >
@@ -437,7 +452,7 @@ export default function AuditorHome() {
                 type="button"
                 onClick={() => setAlertFilter(fb.id)}
                 className={[
-                  "px-3 py-1.5 rounded-full text-sm border whitespace-nowrap",
+                  "px-3 py-1.5 rounded-full text-xs sm:text-sm border whitespace-nowrap",
                   active ? "bg-black text-white border-black" : "bg-white",
                 ].join(" ")}
               >
@@ -448,7 +463,7 @@ export default function AuditorHome() {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+      <div className="hidden sm:grid grid-cols-3 gap-2">
         <button
           type="button"
           className="px-3 py-2 rounded-xl border text-sm"
@@ -465,40 +480,35 @@ export default function AuditorHome() {
         </button>
         <button
           type="button"
-          className="px-3 py-2 rounded-xl border text-sm col-span-2 sm:col-span-1"
+          className="px-3 py-2 rounded-xl border text-sm"
           onClick={() => signOut(auth)}
         >
           Salir
         </button>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-        <div className="rounded-2xl border p-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
+        <div className="rounded-2xl border p-3 sm:p-4">
           <div className="text-sm text-gray-500">Fecha</div>
-          <div className="text-xl font-bold">{dayKey}</div>
+          <div className="text-lg sm:text-xl font-bold">{dayKey}</div>
         </div>
-        <div className="rounded-2xl border p-4">
+        <div className="rounded-2xl border p-3 sm:p-4">
           <div className="text-sm text-gray-500">Total instalaciones</div>
-          <div className="text-xl font-bold">{installations.length}</div>
+          <div className="text-lg sm:text-xl font-bold">{installations.length}</div>
         </div>
-        <div className="rounded-2xl border p-4">
+        <div className="rounded-2xl border p-3 sm:p-4">
           <div className="text-sm text-gray-500">Cuadrillas activas</div>
-          <div className="text-xl font-bold">{squads.length}</div>
+          <div className="text-lg sm:text-xl font-bold">{squads.length}</div>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="rounded-2xl border p-4">
-          <h2 className="font-semibold mb-3">Cuadrillas</h2>
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6">
+        <div className="rounded-2xl border p-3 sm:p-4">
+          <h2 className="font-semibold mb-2 sm:mb-3">Cuadrillas</h2>
 
-          <div className="space-y-2">
+          <div className="space-y-1.5 sm:space-y-2">
             {squads.map((s) => {
-              const st = squadStats[s.id] ?? {
-                count: 0,
-                lastAt: null,
-                avgGapMin: 0,
-                maxGapMin: 0,
-              };
+              const st = squadStats[s.id] ?? { count: 0, lastAt: null, avgGapMin: 0, maxGapMin: 0 };
               const active = selectedSquadId === s.id;
 
               return (
@@ -506,52 +516,19 @@ export default function AuditorHome() {
                   key={s.id}
                   onClick={() => setSelectedSquadId(s.id)}
                   className={[
-                    "w-full text-left border rounded-xl p-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2",
+                    "w-full text-left border rounded-xl p-2.5 sm:p-3 flex items-start sm:items-center justify-between gap-2",
                     active ? "bg-black text-white border-black" : "bg-white",
                   ].join(" ")}
                 >
                   <div>
-                    <div className="font-medium">{s.name}</div>
-                    <div
-                      className={
-                        active ? "text-white/70 text-xs" : "text-gray-500 text-xs"
-                      }
-                    >
-                      ID: {s.id}
-                    </div>
+                    <div className="font-medium text-sm sm:text-base">{s.name}</div>
+                    <div className={active ? "text-white/70 text-xs" : "text-gray-500 text-xs"}>ID: {s.id}</div>
                   </div>
 
-                  <div
-                    className={
-                      active
-                        ? "text-white text-left sm:text-right"
-                        : "text-left sm:text-right"
-                    }
-                  >
-                    <div className={active ? "text-white font-bold" : "font-bold"}>
-                      {st.count}
-                    </div>
-                    <div
-                      className={
-                        active ? "text-white/70 text-xs" : "text-gray-500 text-xs"
-                      }
-                    >
-                      prom: {st.avgGapMin ? fmtGapMinutes(st.avgGapMin) : "-"}
-                    </div>
-                    <div
-                      className={
-                        active ? "text-white/70 text-xs" : "text-gray-500 text-xs"
-                      }
-                    >
-                      max: {st.maxGapMin ? fmtGapMinutes(st.maxGapMin) : "-"}
-                    </div>
-                    <div
-                      className={
-                        active ? "text-white/70 text-xs" : "text-gray-500 text-xs"
-                      }
-                    >
-                      últ: {st.lastAt ? fmtTime(st.lastAt) : "-"}
-                    </div>
+                  <div className={active ? "text-white text-right" : "text-right"}>
+                    <div className="font-bold text-sm">{st.count}</div>
+                    <div className={active ? "text-white/70 text-xs" : "text-gray-500 text-xs"}>prom: {st.avgGapMin ? fmtGapMinutes(st.avgGapMin) : "-"}</div>
+                    <div className={active ? "text-white/70 text-xs" : "text-gray-500 text-xs"}>max: {st.maxGapMin ? fmtGapMinutes(st.maxGapMin) : "-"}</div>
                   </div>
                 </button>
               );
@@ -559,25 +536,20 @@ export default function AuditorHome() {
           </div>
         </div>
 
-        <div className="rounded-2xl border p-4 lg:col-span-2">
-          <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3 mb-3">
+        <div className="rounded-2xl border p-3 sm:p-4 lg:col-span-2">
+          <div className="flex items-end justify-between gap-3 mb-3">
             <div>
-              <h2 className="font-semibold">
-                {selectedSquadName || "Seleccioná una cuadrilla"}
-              </h2>
-              <p className="text-sm text-gray-500">
-                Instalaciones:{" "}
-                <span className="font-medium">{filteredSelectedItems.length}</span>
+              <h2 className="font-semibold text-sm sm:text-base">{selectedSquadName || "Seleccioná una cuadrilla"}</h2>
+              <p className="text-xs sm:text-sm text-gray-500">
+                Instalaciones: <span className="font-medium">{filteredSelectedItems.length}</span>
               </p>
             </div>
           </div>
 
           {selectedSquadId && filteredSelectedItems.length === 0 ? (
-            <p className="text-sm text-gray-500">
-              No hay instalaciones para esta cuadrilla con el filtro elegido.
-            </p>
+            <p className="text-sm text-gray-500">No hay instalaciones para esta cuadrilla con el filtro elegido.</p>
           ) : (
-            <ul className="space-y-2">
+            <ul className="space-y-1.5 sm:space-y-2">
               {filteredSelectedItems.map(({ it, diffMin, gapText }) => {
                 let alertLabel = "";
                 let alertClass = "";
@@ -597,34 +569,25 @@ export default function AuditorHome() {
                       installationRefs.current[it.id] = node;
                     }}
                     className={[
-                      "text-sm border rounded-xl p-3 transition-colors",
-                      highlightedInstallationId === it.id
-                        ? "bg-blue-50 border-blue-300"
-                        : "",
+                      "text-sm border rounded-xl p-2.5 sm:p-3 transition-colors",
+                      highlightedInstallationId === it.id ? "bg-blue-50 border-blue-300" : "",
                     ].join(" ")}
                   >
-                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 sm:gap-3">
-                      <div className="font-medium">{it.idInstalacion}</div>
-                      <div className="text-xs text-gray-500">
-                        {fmtTime(it.createdAt)}
-                      </div>
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="font-medium text-sm">{it.idInstalacion}</div>
+                      <div className="text-xs text-gray-500">{fmtTime(it.createdAt)}</div>
                     </div>
 
-                    {it.observaciones && (
-                      <div className="text-gray-600 mt-1">{it.observaciones}</div>
-                    )}
+                    {it.observaciones && <div className="text-gray-600 mt-1 text-xs sm:text-sm">{it.observaciones}</div>}
 
                     {gapText && (
                       <div className="mt-2 text-xs text-gray-700 bg-gray-50 border rounded-lg px-2 py-1 inline-block">
-                        Tiempo desde la anterior:{" "}
-                        <span className="font-medium">{gapText}</span>
+                        Tiempo desde la anterior: <span className="font-medium">{gapText}</span>
                       </div>
                     )}
 
                     {alertLabel && (
-                      <div
-                        className={`mt-2 text-xs border rounded-lg px-2 py-1 inline-block ${alertClass}`}
-                      >
+                      <div className={`mt-2 text-xs border rounded-lg px-2 py-1 inline-block ${alertClass}`}>
                         {alertLabel}
                       </div>
                     )}
@@ -633,6 +596,15 @@ export default function AuditorHome() {
               })}
             </ul>
           )}
+        </div>
+      </div>
+
+      <div className="fixed bottom-0 left-0 right-0 sm:hidden border-t bg-white/95 backdrop-blur px-3 py-2">
+        <div className="grid grid-cols-4 gap-2">
+          <button type="button" className="rounded-lg border px-2 py-2 text-xs" onClick={exportCsv}>CSV</button>
+          <button type="button" className="rounded-lg border px-2 py-2 text-xs" onClick={() => setAlertFilter("all")}>Filtro</button>
+          <button type="button" className="rounded-lg border px-2 py-2 text-xs" onClick={() => setSearchId("")}>Buscar</button>
+          <button type="button" className="rounded-lg border px-2 py-2 text-xs" onClick={() => signOut(auth)}>Salir</button>
         </div>
       </div>
     </div>
