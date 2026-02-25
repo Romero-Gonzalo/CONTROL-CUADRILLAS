@@ -54,6 +54,99 @@ function downloadTextFile(
   URL.revokeObjectURL(url);
 }
 
+function downloadBlobFile(filename: string, blob: Blob) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+function sanitizePdfText(value: string) {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[\\()]/g, "\\$&")
+    .replace(/\r?\n/g, " ");
+}
+
+function createSimplePdf(lines: string[]) {
+  const width = 595;
+  const height = 842;
+  const marginX = 40;
+  const marginTop = 40;
+  const lineHeight = 14;
+  const maxLinesPerPage = 52;
+
+  const pagedLines: string[][] = [];
+  for (let i = 0; i < lines.length; i += maxLinesPerPage) {
+    pagedLines.push(lines.slice(i, i + maxLinesPerPage));
+  }
+  if (pagedLines.length === 0) pagedLines.push(["Sin datos"]);
+
+  const objects: string[] = [];
+  const addObject = (obj: string) => {
+    objects.push(obj);
+    return objects.length;
+  };
+
+  const pageObjectIds: number[] = [];
+
+  const fontObjectId = addObject("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+  const pagesObjectId = addObject("<< /Type /Pages /Kids [] /Count 0 >>");
+
+  for (const pageLines of pagedLines) {
+    const escapedLines = pageLines.map((line) => sanitizePdfText(line));
+    const startY = height - marginTop;
+    const stream = [
+      "BT",
+      "/F1 10 Tf",
+      `${lineHeight} TL`,
+      `${marginX} ${startY} Td`,
+      ...escapedLines.map((line, idx) => (idx === 0 ? `(${line}) Tj` : `T* (${line}) Tj`)),
+      "ET",
+    ].join("\n");
+
+    const contentObjectId = addObject(
+      `<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`,
+    );
+
+    const pageObjectId = addObject(
+      `<< /Type /Page /Parent ${pagesObjectId} 0 R /MediaBox [0 0 ${width} ${height}] /Resources << /Font << /F1 ${fontObjectId} 0 R >> >> /Contents ${contentObjectId} 0 R >>`,
+    );
+    pageObjectIds.push(pageObjectId);
+  }
+
+  objects[pagesObjectId - 1] = `<< /Type /Pages /Kids [${pageObjectIds
+    .map((id) => `${id} 0 R`)
+    .join(" ")}] /Count ${pageObjectIds.length} >>`;
+
+  const catalogObjectId = addObject(`<< /Type /Catalog /Pages ${pagesObjectId} 0 R >>`);
+
+  let pdf = "%PDF-1.4\n";
+  const offsets: number[] = [0];
+
+  for (let i = 0; i < objects.length; i++) {
+    offsets.push(pdf.length);
+    pdf += `${i + 1} 0 obj\n${objects[i]}\nendobj\n`;
+  }
+
+  const xrefOffset = pdf.length;
+  pdf += `xref\n0 ${objects.length + 1}\n`;
+  pdf += "0000000000 65535 f \n";
+
+  for (let i = 1; i <= objects.length; i++) {
+    pdf += `${String(offsets[i]).padStart(10, "0")} 00000 n \n`;
+  }
+
+  pdf += `trailer\n<< /Size ${objects.length + 1} /Root ${catalogObjectId} 0 R >>\n`;
+  pdf += `startxref\n${xrefOffset}\n%%EOF`;
+
+  return new Blob([pdf], { type: "application/pdf" });
+}
 function fmtTime(ts: any) {
   if (!ts?.toDate) return "";
   const d = ts.toDate() as Date;
@@ -355,7 +448,79 @@ export default function AuditorHome() {
 
     downloadTextFile(`IPT_instalaciones_${dayKey}.csv`, lines.join("\n"));
   };
+const buildPdfLines = (rows: InstallationItem[], title: string) => {
+    const squadNameById: Record<string, string> = {};
+    for (const s of squads) squadNameById[s.id] = s.name;
 
+    const sorted = [...rows].sort((a, b) => {
+      const ta = a.createdAt?.toDate?.()?.getTime?.() ?? 0;
+      const tb = b.createdAt?.toDate?.()?.getTime?.() ?? 0;
+      return ta - tb;
+    });
+
+    const lines = [
+      "Internet Para Todos - Reporte de Instalaciones",
+      title,
+      `Fecha: ${dayKey}`,
+      `Total instalaciones: ${sorted.length}`,
+      "",
+      "Hora | Cuadrilla | ID Instalacion | Observaciones | Gap min",
+      "--------------------------------------------------------------------------",
+    ];
+
+    const lastTimeBySquad: Record<string, number> = {};
+
+    for (const it of sorted) {
+      const squadId = it.squadId ?? "";
+      const squadName = squadNameById[squadId] ?? squadId;
+      const d: Date | null = it.createdAt?.toDate?.() ?? null;
+      const timeStr = d
+        ? d.toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" })
+        : "-";
+
+      let gapMin = "-";
+      if (d) {
+        const prevMs = lastTimeBySquad[squadId];
+        if (prevMs) {
+          gapMin = String(Math.max(0, Math.round((d.getTime() - prevMs) / 60000)));
+        }
+        lastTimeBySquad[squadId] = d.getTime();
+      }
+
+      lines.push(
+        `${timeStr} | ${squadName} | ${it.idInstalacion ?? ""} | ${it.observaciones ?? ""} | ${gapMin}`,
+      );
+    }
+
+    return lines;
+  };
+
+  const exportPdfAll = () => {
+    const pdf = createSimplePdf(
+      buildPdfLines(installations, "Reporte general de cuadrillas"),
+    );
+    downloadBlobFile(`IPT_instalaciones_${dayKey}.pdf`, pdf);
+  };
+
+  const exportPdfSelectedSquad = () => {
+    if (!selectedSquadId) return;
+    const title = `Cuadrilla: ${selectedSquadName || selectedSquadId}`;
+    const pdf = createSimplePdf(buildPdfLines(selectedList, title));
+    downloadBlobFile(`IPT_instalaciones_${selectedSquadId}_${dayKey}.pdf`, pdf);
+  };
+
+  const exportPdfEachSquad = () => {
+    const downloads = squads.map((squad, idx) => {
+      const rows = installations.filter((it) => it.squadId === squad.id);
+      const pdf = createSimplePdf(buildPdfLines(rows, `Cuadrilla: ${squad.name}`));
+
+      return window.setTimeout(() => {
+        downloadBlobFile(`IPT_instalaciones_${squad.id}_${dayKey}.pdf`, pdf);
+      }, idx * 250);
+    });
+
+    return () => downloads.forEach((id) => window.clearTimeout(id));
+  };
   return (
     <div className="px-4 py-4 pb-24 sm:pb-6 sm:p-6 space-y-4 sm:space-y-6 max-w-6xl mx-auto">
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 items-stretch">
@@ -438,6 +603,23 @@ export default function AuditorHome() {
             title="Exporta todas las instalaciones del día a CSV"
           >
             Exportar CSV
+          </button>
+          <button
+            type="button"
+            className="hidden sm:block px-3 py-2 rounded-xl border text-sm"
+            onClick={exportPdfAll}
+            title="Exporta todas las instalaciones del día a PDF"
+          >
+            Exportar PDF (general)
+          </button>
+
+          <button
+            type="button"
+            className="hidden sm:block px-3 py-2 rounded-xl border text-sm"
+            onClick={exportPdfEachSquad}
+            title="Descarga un PDF separado por cada cuadrilla"
+          >
+            Exportar PDF por cuadrilla
           </button>
         </div>
       </div>
@@ -600,10 +782,13 @@ export default function AuditorHome() {
       </div>
 
       <div className="fixed bottom-0 left-0 right-0 sm:hidden border-t bg-white/95 backdrop-blur px-3 py-2">
-        <div className="grid grid-cols-4 gap-2">
-          <button type="button" className="rounded-lg border px-2 py-2 text-xs" onClick={exportCsv}>CSV</button>
-          <button type="button" className="rounded-lg border px-2 py-2 text-xs" onClick={() => setAlertFilter("all")}>Filtro</button>
-          <button type="button" className="rounded-lg border px-2 py-2 text-xs" onClick={() => setSearchId("")}>Buscar</button>
+        <div className="grid grid-cols-3 gap-2">
+       <button type="button" className="rounded-lg border px-2 py-2 text-xs" onClick={exportCsv}>CSV</button>
+<button type="button" className="rounded-lg border px-2 py-2 text-xs" onClick={exportPdfSelectedSquad}>PDF cuadrilla</button>
+          <button type="button" className="rounded-lg border px-2 py-2 text-xs" onClick={exportPdfAll}>PDF general</button>
+        </div>
+        <div className="grid grid-cols-3 gap-2 mt-2">
+          <button type="button" className="rounded-lg border px-2 py-2 text-xs" onClick={exportPdfEachSquad}>PDF x cuadrilla</button>          <button type="button" className="rounded-lg border px-2 py-2 text-xs" onClick={() => setSearchId("")}>Buscar</button>
           <button type="button" className="rounded-lg border px-2 py-2 text-xs" onClick={() => signOut(auth)}>Salir</button>
         </div>
       </div>
