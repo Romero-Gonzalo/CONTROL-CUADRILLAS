@@ -1,4 +1,10 @@
-import { addDoc, collection, serverTimestamp } from "firebase/firestore";
+import {
+  addDoc,
+  collection,
+  doc,
+  serverTimestamp,
+  updateDoc,
+} from "firebase/firestore";
 import { db } from "../lib/firebase";
 import { getDayKey } from "../utils/dayKey";
 
@@ -17,5 +23,18 @@ export async function createInstallation(params: {
     createdBy: userId,
     dayKey: getDayKey(),
     createdAt: serverTimestamp(),
+  });
+}
+export async function updateInstallation(params: {
+  id: string;
+  idInstalacion: string;
+  observaciones: string;
+}) {
+  const { id, idInstalacion, observaciones } = params;
+
+  return updateDoc(doc(db, "installations", id), {
+    idInstalacion: idInstalacion.trim(),
+    observaciones: observaciones.trim(),
+    updatedAt: serverTimestamp(),
   });
 }

@@ -46,8 +46,18 @@ service cloud.firestore {
         && request.resource.data.squadId == mySquadId()
         && request.resource.data.createdBy == request.auth.uid;
 
-      // por ahora: instaladores NO editan ni borran (evita “ajustes creativos”)
-      allow update, delete: if isAuditor();
+      // editar: auditor siempre; instalador solo su cuadrilla y dentro de 24h de creación
+      allow update: if isAuditor()
+        || (isInstaller()
+          && resource.data.squadId == mySquadId()
+          && resource.data.createdBy == request.auth.uid
+          && request.resource.data.squadId == resource.data.squadId
+          && request.resource.data.createdBy == resource.data.createdBy
+          && request.resource.data.dayKey == resource.data.dayKey
+          && request.resource.data.createdAt == resource.data.createdAt
+          && request.time < resource.data.createdAt + duration.value(24, "h"));
+
+      allow delete: if isAuditor();
     }
   }
 }
