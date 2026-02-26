@@ -2,8 +2,14 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { signOut } from "firebase/auth";
 import { auth, db } from "../../lib/firebase";
 import { useAuth } from "../../app/AuthProvider";
-import { collection, onSnapshot, query, where } from "firebase/firestore";
-import { getDayKey } from "../../utils/dayKey";
+import {
+  Timestamp,
+  collection,
+  onSnapshot,
+  orderBy,
+  query,
+  where,
+} from "firebase/firestore";import { getDayKey } from "../../utils/dayKey";
 
 type Squad = {
   id: string;
@@ -188,7 +194,18 @@ function max(nums: number[]) {
   if (nums.length === 0) return 0;
   return nums.reduce((m, v) => (v > m ? v : m), nums[0]);
 }
+function toDateInputValue(date: Date) {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
 
+function monthKeyFromDate(date: Date) {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  return `${y}-${m}`;
+}
 export default function AuditorHome() {
   const { profile } = useAuth();
 
@@ -199,7 +216,15 @@ export default function AuditorHome() {
   const [dayInput, setDayInput] = useState(() => getDayKey());
   const [searchId, setSearchId] = useState("");
   const [alertFilter, setAlertFilter] = useState<AlertLevel>("all");
-
+const [rangeFrom, setRangeFrom] = useState(() => {
+    const d = new Date();
+    d.setMonth(d.getMonth() - 2);
+    d.setDate(1);
+    return toDateInputValue(d);
+  });
+  const [rangeTo, setRangeTo] = useState(() => toDateInputValue(new Date()));
+  const [selectedRangeSquadIds, setSelectedRangeSquadIds] = useState<string[]>([]);
+  const [rangeInstallations, setRangeInstallations] = useState<InstallationItem[]>([]);
   const [pendingScrollInstallationId, setPendingScrollInstallationId] =
     useState<string | null>(null);
   const [highlightedInstallationId, setHighlightedInstallationId] = useState<
@@ -287,6 +312,100 @@ export default function AuditorHome() {
 
     return () => unsub();
   }, [dayKey]);
+
+   useEffect(() => {
+    const fromDate = new Date(`${rangeFrom}T00:00:00`);
+    const toDate = new Date(`${rangeTo}T23:59:59.999`);
+
+    if (Number.isNaN(fromDate.getTime()) || Number.isNaN(toDate.getTime())) {
+      setRangeInstallations([]);
+      return;
+    }
+
+    if (fromDate.getTime() > toDate.getTime()) {
+      setRangeInstallations([]);
+      return;
+    }
+
+    const q = query(
+      collection(db, "installations"),
+      where("createdAt", ">=", Timestamp.fromDate(fromDate)),
+      where("createdAt", "<=", Timestamp.fromDate(toDate)),
+      orderBy("createdAt", "asc"),
+    );
+
+    const unsub = onSnapshot(
+      q,
+      (snap) => {
+        const rows = snap.docs.map((d) => ({
+          id: d.id,
+          ...(d.data() as any),
+        })) as InstallationItem[];
+
+        setRangeInstallations(rows);
+      },
+      (err) => console.error(err),
+    );
+
+    return () => unsub();
+  }, [rangeFrom, rangeTo]);
+
+  useEffect(() => {
+    if (squads.length === 0) {
+      setSelectedRangeSquadIds([]);
+      return;
+    }
+
+    setSelectedRangeSquadIds((prev) => {
+      if (prev.length === 0) return squads.map((s) => s.id);
+      const valid = prev.filter((id) => squads.some((s) => s.id === id));
+      return valid.length > 0 ? valid : squads.map((s) => s.id);
+    });
+  }, [squads]);
+
+  const rangeInstallationsFiltered = useMemo(() => {
+    if (selectedRangeSquadIds.length === 0) return [];
+    const selectedSet = new Set(selectedRangeSquadIds);
+    return rangeInstallations.filter((it) => selectedSet.has(it.squadId));
+  }, [rangeInstallations, selectedRangeSquadIds]);
+
+  const monthlySummary = useMemo(() => {
+    const byMonth: Record<string, number> = {};
+
+    for (const it of rangeInstallationsFiltered) {
+      const createdAt = it.createdAt?.toDate?.() as Date | undefined;
+      if (!createdAt) continue;
+      const key = monthKeyFromDate(createdAt);
+      byMonth[key] = (byMonth[key] ?? 0) + 1;
+    }
+
+    return Object.entries(byMonth)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([key, count]) => {
+        const [y, m] = key.split("-");
+        const monthDate = new Date(Number(y), Number(m) - 1, 1);
+        const label = monthDate.toLocaleDateString("es-AR", {
+          year: "numeric",
+          month: "long",
+        });
+        return { key, label, count };
+      });
+  }, [rangeInstallationsFiltered]);
+
+  const hasInvalidRange = useMemo(() => {
+    const fromDate = new Date(`${rangeFrom}T00:00:00`);
+    const toDate = new Date(`${rangeTo}T23:59:59.999`);
+    if (Number.isNaN(fromDate.getTime()) || Number.isNaN(toDate.getTime())) return true;
+    return fromDate.getTime() > toDate.getTime();
+  }, [rangeFrom, rangeTo]);
+
+  const toggleRangeSquad = (squadId: string) => {
+    setSelectedRangeSquadIds((prev) =>
+      prev.includes(squadId)
+        ? prev.filter((id) => id !== squadId)
+        : [...prev, squadId],
+    );
+  };
 
   const squadStats = useMemo(() => {
     const groups: Record<string, InstallationItem[]> = {};
@@ -667,6 +786,75 @@ const buildPdfLines = (rows: InstallationItem[], title: string) => {
         >
           Salir
         </button>
+      </div>
+      
+      <div className="rounded-2xl border p-3 sm:p-4 space-y-3">
+        <div>
+          <h2 className="font-semibold text-sm sm:text-base">Resumen mensual por rango</h2>
+          <p className="text-xs sm:text-sm text-gray-500">
+            Elegí desde/hasta y una o más cuadrillas para ver cuántas instalaciones hay por mes.
+          </p>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          <label className="text-sm">
+            <span className="text-gray-600">Desde</span>
+            <input
+              type="date"
+              className="w-full border rounded-xl px-3 py-2 text-sm mt-1"
+              value={rangeFrom}
+              onChange={(e) => setRangeFrom(e.target.value)}
+            />
+          </label>
+          <label className="text-sm">
+            <span className="text-gray-600">Hasta</span>
+            <input
+              type="date"
+              className="w-full border rounded-xl px-3 py-2 text-sm mt-1"
+              value={rangeTo}
+              onChange={(e) => setRangeTo(e.target.value)}
+            />
+          </label>
+        </div>
+
+        <div>
+          <div className="text-sm text-gray-600 mb-2">Cuadrillas incluidas</div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+            {squads.map((s) => {
+              const checked = selectedRangeSquadIds.includes(s.id);
+              return (
+                <label key={s.id} className="flex items-center gap-2 text-sm border rounded-lg px-2 py-2">
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={() => toggleRangeSquad(s.id)}
+                  />
+                  <span>{s.name}</span>
+                </label>
+              );
+            })}
+          </div>
+        </div>
+
+        {hasInvalidRange ? (
+          <p className="text-sm text-red-600">El rango de fechas es inválido ("Desde" no puede ser mayor a "Hasta").</p>
+        ) : monthlySummary.length === 0 ? (
+          <p className="text-sm text-gray-500">No hay instalaciones para el rango/cuadrillas seleccionadas.</p>
+        ) : (
+          <div className="space-y-2">
+            <div className="text-sm text-gray-600">
+              Total del rango: <span className="font-semibold">{rangeInstallationsFiltered.length}</span>
+            </div>
+            <ul className="space-y-1">
+              {monthlySummary.map((row) => (
+                <li key={row.key} className="border rounded-lg px-3 py-2 flex items-center justify-between text-sm">
+                  <span className="capitalize">{row.label}</span>
+                  <span className="font-semibold">{row.count}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
