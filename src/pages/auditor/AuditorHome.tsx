@@ -244,7 +244,7 @@ const [rangeFrom, setRangeFrom] = useState(() => {
     if (!normalizedSearch) return [];
 
     return installations.filter((it) =>
-      normalizeInstallationId(it.idInstalacion ?? "").includes(normalizedSearch),
+            normalizeInstallationId(it.idInstalacion ?? "").includes(normalizedSearch),
     );
   }, [installations, normalizedSearch]);
 
@@ -641,8 +641,8 @@ const buildPdfLines = (rows: InstallationItem[], title: string) => {
     return () => downloads.forEach((id) => window.clearTimeout(id));
   };
   return (
-    <div className="px-4 py-4 pb-24 sm:pb-6 sm:p-6 space-y-4 sm:space-y-6 max-w-6xl mx-auto">
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 items-stretch">
+<div className="px-4 py-4 pb-24 sm:pb-6 sm:p-6 flex flex-col gap-4 sm:gap-6 max-w-6xl mx-auto">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 items-stretch order-3 sm:order-1">
         <div className="rounded-2xl border p-3 sm:p-4 lg:col-span-2">
           <div className="text-sm font-medium mb-2">Buscar instalación</div>
 
@@ -743,8 +743,8 @@ const buildPdfLines = (rows: InstallationItem[], title: string) => {
         </div>
       </div>
 
-      <div className="overflow-x-auto -mx-1 px-1">
-        <div className="flex gap-2 min-w-max">
+      <div className="overflow-x-auto -mx-1 px-1 order-4 sm:order-2">
+                <div className="flex gap-2 min-w-max">
           {filterButtons.map((fb) => {
             const active = fb.id === alertFilter;
             return (
@@ -764,8 +764,8 @@ const buildPdfLines = (rows: InstallationItem[], title: string) => {
         </div>
       </div>
 
-      <div className="hidden sm:grid grid-cols-3 gap-2">
-        <button
+      <div className="hidden sm:grid grid-cols-3 gap-2 sm:order-3">
+                <button
           type="button"
           className="px-3 py-2 rounded-xl border text-sm"
           onClick={() => setAlertFilter("all")}
@@ -788,8 +788,8 @@ const buildPdfLines = (rows: InstallationItem[], title: string) => {
         </button>
       </div>
       
-      <div className="rounded-2xl border p-3 sm:p-4 space-y-3">
-        <div>
+      <div className="rounded-2xl border p-3 sm:p-4 space-y-3 order-5 sm:order-4">
+                <div>
           <h2 className="font-semibold text-sm sm:text-base">Resumen mensual por rango</h2>
           <p className="text-xs sm:text-sm text-gray-500">
             Elegí desde/hasta y una o más cuadrillas para ver cuántas instalaciones hay por mes.
@@ -857,8 +857,8 @@ const buildPdfLines = (rows: InstallationItem[], title: string) => {
         )}
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
-        <div className="rounded-2xl border p-3 sm:p-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4 order-1 sm:order-5">
+                <div className="rounded-2xl border p-3 sm:p-4">
           <div className="text-sm text-gray-500">Fecha</div>
           <div className="text-lg sm:text-xl font-bold">{dayKey}</div>
         </div>
@@ -872,7 +872,7 @@ const buildPdfLines = (rows: InstallationItem[], title: string) => {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6 order-2 sm:order-6">
         <div className="rounded-2xl border p-3 sm:p-4">
           <h2 className="font-semibold mb-2 sm:mb-3">Cuadrillas</h2>
 
