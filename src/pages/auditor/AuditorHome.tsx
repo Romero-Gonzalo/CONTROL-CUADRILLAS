@@ -6,9 +6,11 @@ import {
   Timestamp,
   collection,
   onSnapshot,
-  
+  doc,
   orderBy,
   query,
+  serverTimestamp,
+  setDoc,
   where,
 } from "firebase/firestore";
 import { getDayKey } from "../../utils/dayKey";
@@ -27,7 +29,14 @@ type InstallationItem = {
   squadId: string;
   createdAt?: any;
 };
+type DayObservation = {
+  text: string;
+};
 
+type SquadObservation = {
+  squadId: string;
+  text: string;
+};
 type AlertLevel = "all" | "normal" | "delay" | "critical";
 
 function getAlertLevel(diffMin: number): Exclude<AlertLevel, "all"> {
@@ -239,6 +248,11 @@ const [rangeFrom, setRangeFrom] = useState(() => {
   const [savingEdit, setSavingEdit] = useState(false);
   const [deletingInstallationId, setDeletingInstallationId] = useState<string | null>(null);
   const [actionError, setActionError] = useState("");
+  const [dayObservation, setDayObservation] = useState("");
+  const [savingDayObservation, setSavingDayObservation] = useState(false);
+  const [squadObservationsById, setSquadObservationsById] = useState<Record<string, string>>({});
+  const [squadObservationDraft, setSquadObservationDraft] = useState("");
+  const [savingSquadObservation, setSavingSquadObservation] = useState(false);
   const installationRefs = useRef<Record<string, HTMLLIElement | null>>({});
 
   const dayKey = useMemo(() => dayInput, [dayInput]);
@@ -314,6 +328,43 @@ const [rangeFrom, setRangeFrom] = useState(() => {
         });
 
         setInstallations(rows);
+      },
+      (err) => console.error(err),
+    );
+
+    return () => unsub();
+  }, [dayKey]);
+useEffect(() => {
+    const dayObservationRef = doc(db, "dailyObservations", dayKey);
+
+    const unsub = onSnapshot(
+      dayObservationRef,
+      (snap) => {
+        const data = snap.data() as DayObservation | undefined;
+        setDayObservation(data?.text ?? "");
+      },
+      (err) => console.error(err),
+    );
+
+    return () => unsub();
+  }, [dayKey]);
+
+  useEffect(() => {
+    const q = query(
+      collection(db, "squadDailyObservations"),
+      where("dayKey", "==", dayKey),
+    );
+
+    const unsub = onSnapshot(
+      q,
+      (snap) => {
+        const map: Record<string, string> = {};
+        snap.docs.forEach((d) => {
+          const data = d.data() as SquadObservation;
+          if (!data?.squadId) return;
+          map[data.squadId] = data.text ?? "";
+        });
+        setSquadObservationsById(map);
       },
       (err) => console.error(err),
     );
@@ -455,7 +506,14 @@ const [rangeFrom, setRangeFrom] = useState(() => {
     const s = squads.find((x) => x.id === selectedSquadId);
     return s?.name ?? selectedSquadId ?? "";
   }, [squads, selectedSquadId]);
+useEffect(() => {
+    if (!selectedSquadId) {
+      setSquadObservationDraft("");
+      return;
+    }
 
+    setSquadObservationDraft(squadObservationsById[selectedSquadId] ?? "");
+  }, [selectedSquadId, squadObservationsById]);
   const selectedItemsWithGap = useMemo(
     () =>
       selectedList.map((it, idx) => {
@@ -563,6 +621,57 @@ const startEdit = (item: InstallationItem) => {
       setDeletingInstallationId(null);
     }
   };
+
+  const saveDayObservation = async () => {
+    if (!profile?.uid) return;
+
+    setSavingDayObservation(true);
+    setActionError("");
+    try {
+      await setDoc(
+        doc(db, "dailyObservations", dayKey),
+        {
+          dayKey,
+          text: dayObservation.trim(),
+          updatedBy: profile.uid,
+          updatedAt: serverTimestamp(),
+        },
+        { merge: true },
+      );
+    } catch (err) {
+      console.error(err);
+      setActionError("No se pudo guardar la observación general del día.");
+    } finally {
+      setSavingDayObservation(false);
+    }
+  };
+
+  const saveSquadObservation = async () => {
+    if (!profile?.uid || !selectedSquadId) return;
+
+    setSavingSquadObservation(true);
+    setActionError("");
+    try {
+      await setDoc(
+        doc(db, "squadDailyObservations", `${dayKey}__${selectedSquadId}`),
+        {
+          dayKey,
+          squadId: selectedSquadId,
+          text: squadObservationDraft.trim(),
+          updatedBy: profile.uid,
+          updatedAt: serverTimestamp(),
+        },
+        { merge: true },
+      );
+    } catch (err) {
+      console.error(err);
+      setActionError("No se pudo guardar la observación de la cuadrilla.");
+    } finally {
+      setSavingSquadObservation(false);
+    }
+  };
+
+
   const filterButtons: Array<{ id: AlertLevel; label: string }> = [
     { id: "all", label: "Todas" },
     { id: "normal", label: "Sin demora" },
@@ -802,6 +911,26 @@ const buildPdfLines = (rows: InstallationItem[], title: string) => {
             Exportar PDF por cuadrilla
           </button>
         </div>
+        <div className="rounded-2xl border p-3 sm:p-4 lg:col-span-3 space-y-3">
+          <div>
+            <p className="text-sm font-medium">Observación general del día</p>
+            <p className="text-xs text-gray-500">Ej: lluvia, falta de material o cualquier incidencia general.</p>
+          </div>
+          <textarea
+            className="w-full border rounded-xl px-3 py-2 text-sm min-h-24"
+            value={dayObservation}
+            onChange={(e) => setDayObservation(e.target.value)}
+            placeholder="Escribí una observación general del día..."
+          />
+          <button
+            type="button"
+            onClick={saveDayObservation}
+            disabled={savingDayObservation}
+            className="w-full sm:w-auto rounded-lg border px-3 py-2 text-sm font-medium disabled:opacity-50"
+          >
+            {savingDayObservation ? "Guardando..." : "Guardar observación del día"}
+          </button>
+        </div>
       </div>
 
       <div className="overflow-x-auto -mx-1 px-1 order-4 sm:order-2">
@@ -977,9 +1106,32 @@ const buildPdfLines = (rows: InstallationItem[], title: string) => {
             </div>
           </div>
 
-            {actionError && (
+             {actionError && (
             <div className="mb-3 text-sm text-red-700 bg-red-50 border border-red-200 rounded-xl p-2.5">
               {actionError}
+            </div>
+          )}
+
+{selectedSquadId && (
+            <div className="mb-4 rounded-xl border bg-gray-50 p-3 space-y-2">
+              <div>
+                <p className="text-sm font-medium">Observación de cuadrilla</p>
+                <p className="text-xs text-gray-500">Ej: se pinchó la camioneta, falta de nafta, etc.</p>
+              </div>
+              <textarea
+                className="w-full border rounded-xl px-3 py-2 text-sm min-h-20 bg-white"
+                value={squadObservationDraft}
+                onChange={(e) => setSquadObservationDraft(e.target.value)}
+                placeholder="Escribí una observación para esta cuadrilla..."
+              />
+              <button
+                type="button"
+                onClick={saveSquadObservation}
+                disabled={savingSquadObservation}
+                className="rounded-lg border px-3 py-2 text-sm font-medium disabled:opacity-50"
+              >
+                {savingSquadObservation ? "Guardando..." : "Guardar observación de cuadrilla"}
+              </button>
             </div>
           )}
 

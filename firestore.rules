@@ -59,5 +59,16 @@ service cloud.firestore {
 
       allow delete: if isAuditor();
     }
+    // OBSERVACION GENERAL POR DIA (una por dayKey)
+    match /dailyObservations/{dayKey} {
+      allow read: if signedIn();
+      allow write: if isAuditor();
+    }
+
+    // OBSERVACION POR CUADRILLA Y DIA (id sugerido: {dayKey}__{squadId})
+    match /squadDailyObservations/{docId} {
+      allow read: if signedIn();
+      allow write: if isAuditor();
+    }
   }
 }
