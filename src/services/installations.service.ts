@@ -2,6 +2,7 @@ import {
   addDoc,
   collection,
   doc,
+   deleteDoc,
   serverTimestamp,
   updateDoc,
 } from "firebase/firestore";
@@ -37,4 +38,8 @@ export async function updateInstallation(params: {
     observaciones: observaciones.trim(),
     updatedAt: serverTimestamp(),
   });
+}
+
+export async function deleteInstallation(id: string) {
+  return deleteDoc(doc(db, "installations", id));
 }

@@ -6,10 +6,13 @@ import {
   Timestamp,
   collection,
   onSnapshot,
+  
   orderBy,
   query,
   where,
-} from "firebase/firestore";import { getDayKey } from "../../utils/dayKey";
+} from "firebase/firestore";
+import { getDayKey } from "../../utils/dayKey";
+import { deleteInstallation, updateInstallation } from "../../services/installations.service";
 
 type Squad = {
   id: string;
@@ -230,7 +233,12 @@ const [rangeFrom, setRangeFrom] = useState(() => {
   const [highlightedInstallationId, setHighlightedInstallationId] = useState<
     string | null
   >(null);
-
+ const [editingInstallationId, setEditingInstallationId] = useState<string | null>(null);
+  const [editIdInstalacion, setEditIdInstalacion] = useState("");
+  const [editObservaciones, setEditObservaciones] = useState("");
+  const [savingEdit, setSavingEdit] = useState(false);
+  const [deletingInstallationId, setDeletingInstallationId] = useState<string | null>(null);
+  const [actionError, setActionError] = useState("");
   const installationRefs = useRef<Record<string, HTMLLIElement | null>>({});
 
   const dayKey = useMemo(() => dayInput, [dayInput]);
@@ -501,7 +509,60 @@ const [rangeFrom, setRangeFrom] = useState(() => {
     setSelectedSquadId(item.squadId);
     setPendingScrollInstallationId(item.id);
   };
+const startEdit = (item: InstallationItem) => {
+    setEditingInstallationId(item.id);
+    setEditIdInstalacion(item.idInstalacion ?? "");
+    setEditObservaciones(item.observaciones ?? "");
+    setActionError("");
+  };
 
+  const cancelEdit = () => {
+    setEditingInstallationId(null);
+    setEditIdInstalacion("");
+    setEditObservaciones("");
+  };
+
+  const onSaveEdit = async (itemId: string) => {
+    if (!editIdInstalacion.trim()) {
+      setActionError("El ID de instalación es obligatorio");
+      return;
+    }
+
+    setSavingEdit(true);
+    setActionError("");
+
+    try {
+      await updateInstallation({
+        id: itemId,
+        idInstalacion: editIdInstalacion,
+        observaciones: editObservaciones,
+      });
+      cancelEdit();
+    } catch {
+      setActionError("No se pudo editar la instalación");
+    } finally {
+      setSavingEdit(false);
+    }
+  };
+
+  const onDeleteInstallation = async (item: InstallationItem) => {
+    const confirmed = window.confirm(
+      `¿Seguro que querés eliminar la instalación ${item.idInstalacion}? Esta acción no se puede deshacer.`,
+    );
+    if (!confirmed) return;
+
+    setDeletingInstallationId(item.id);
+    setActionError("");
+
+    try {
+      await deleteInstallation(item.id);
+      if (editingInstallationId === item.id) cancelEdit();
+    } catch {
+      setActionError("No se pudo eliminar la instalación");
+    } finally {
+      setDeletingInstallationId(null);
+    }
+  };
   const filterButtons: Array<{ id: AlertLevel; label: string }> = [
     { id: "all", label: "Todas" },
     { id: "normal", label: "Sin demora" },
@@ -916,6 +977,12 @@ const buildPdfLines = (rows: InstallationItem[], title: string) => {
             </div>
           </div>
 
+            {actionError && (
+            <div className="mb-3 text-sm text-red-700 bg-red-50 border border-red-200 rounded-xl p-2.5">
+              {actionError}
+            </div>
+          )}
+
           {selectedSquadId && filteredSelectedItems.length === 0 ? (
             <p className="text-sm text-gray-500">No hay instalaciones para esta cuadrilla con el filtro elegido.</p>
           ) : (
@@ -948,18 +1015,81 @@ const buildPdfLines = (rows: InstallationItem[], title: string) => {
                       <div className="text-xs text-gray-500">{fmtTime(it.createdAt)}</div>
                     </div>
 
-                    {it.observaciones && <div className="text-gray-600 mt-1 text-xs sm:text-sm">{it.observaciones}</div>}
+{editingInstallationId === it.id ? (
+                      <div className="mt-2 space-y-2">
+                        <div className="space-y-1">
+                          <label className="text-xs font-medium">ID de instalación</label>
+                          <input
+                            className="w-full border rounded-xl px-3 py-2 text-sm"
+                            value={editIdInstalacion}
+                            onChange={(e) => setEditIdInstalacion(e.target.value)}
+                            placeholder="IPT-12345"
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-xs font-medium">Observaciones</label>
+                          <textarea
+                            className="w-full border rounded-xl px-3 py-2 text-sm"
+                            value={editObservaciones}
+                            onChange={(e) => setEditObservaciones(e.target.value)}
+                            placeholder="Opcional"
+                          />
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            disabled={savingEdit}
+                            onClick={() => onSaveEdit(it.id)}
+                            className="rounded-lg bg-black text-white px-3 py-1.5 text-xs font-medium disabled:opacity-50"
+                          >
+                            {savingEdit ? "Guardando..." : "Guardar cambios"}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={cancelEdit}
+                            className="rounded-lg border px-3 py-1.5 text-xs"
+                          >
+                            Cancelar
+                          </button>
+                        </div>
 
-                    {gapText && (
-                      <div className="mt-2 text-xs text-gray-700 bg-gray-50 border rounded-lg px-2 py-1 inline-block">
-                        Tiempo desde la anterior: <span className="font-medium">{gapText}</span>
                       </div>
-                    )}
+                      ) : (
+                      <>
+                        {it.observaciones && (
+                          <div className="text-gray-600 mt-1 text-xs sm:text-sm">{it.observaciones}</div>
+                        )}
 
-                    {alertLabel && (
-                      <div className={`mt-2 text-xs border rounded-lg px-2 py-1 inline-block ${alertClass}`}>
-                        {alertLabel}
-                      </div>
+                        <div className="mt-2 flex flex-wrap items-center gap-2">
+                          {gapText && (
+                            <div className="text-xs text-gray-700 bg-gray-50 border rounded-lg px-2 py-1 inline-block">
+                              Tiempo desde la anterior: <span className="font-medium">{gapText}</span>
+                            </div>
+                          )}
+
+                          {alertLabel && (
+                            <div className={`text-xs border rounded-lg px-2 py-1 inline-block ${alertClass}`}>
+                              {alertLabel}
+                            </div>
+                          )}
+
+                          <button
+                            type="button"
+                            onClick={() => startEdit(it)}
+                            className="text-xs rounded-lg border px-2 py-1"
+                          >
+                            Editar
+                          </button>
+                          <button
+                            type="button"
+                            disabled={deletingInstallationId === it.id}
+                            onClick={() => onDeleteInstallation(it)}
+                            className="text-xs rounded-lg border border-red-300 text-red-700 px-2 py-1 disabled:opacity-60"
+                          >
+                            {deletingInstallationId === it.id ? "Eliminando..." : "Eliminar"}
+                          </button>
+                        </div>
+                      </>
                     )}
                   </li>
                 );
