@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { signOut } from "firebase/auth";
 import { auth, db } from "../../lib/firebase";
 import { useAuth } from "../../app/AuthProvider";
+import { Link } from "react-router-dom";
 import {
   Timestamp,
   collection,
@@ -911,6 +912,12 @@ const buildPdfLines = (rows: InstallationItem[], title: string) => {
             Exportar PDF por cuadrilla
           </button>
         </div>
+        <Link
+  to="/auditor/observaciones"
+  className="px-3 py-2 rounded-xl border text-sm inline-block"
+>
+  Ver historial de observaciones
+</Link>
         <div className="rounded-2xl border p-3 sm:p-4 lg:col-span-3 space-y-3">
           <div>
             <p className="text-sm font-medium">Observación general del día</p>

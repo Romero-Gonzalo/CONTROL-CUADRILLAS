@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { useAuth } from "../app/AuthProvider";
 import Login from "../pages/auth/Login";
+import AuditorObservationsHistory from "../pages/auditor/AuditorObservationsHistory";
 import InstallerHome from "../pages/installer/InstallerHome";
 import AuditorHome from "../pages/auditor/AuditorHome";
 import ProtectedRoute from "./ProtectedRoute";
@@ -31,7 +32,14 @@ export default function AppRouter() {
             </ProtectedRoute>
           }
         />
-
+<Route
+  path="/auditor/observaciones"
+  element={
+    <ProtectedRoute allow={["AUDITOR"]}>
+      <AuditorObservationsHistory />
+    </ProtectedRoute>
+  }
+/>
         <Route
           path="/auditor"
           element={
