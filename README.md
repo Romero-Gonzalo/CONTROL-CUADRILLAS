@@ -71,3 +71,15 @@ export default defineConfig([
   },
 ])
 ```
+
+## Integración opcional con Google Sheets (Apps Script)
+
+Para que el flujo de instalador también envíe el ID al script de Google Sheets, configurar en `.env`:
+
+```bash
+VITE_APPS_SCRIPT_WEBAPP_URL="https://script.google.com/macros/s/TU_WEB_APP_ID/exec"
+```
+
+Si la variable no está configurada, el ID igual se guarda en Firestore, pero no se envía al Apps Script.
+
+> Nota: el envío desde navegador se realiza en modo `no-cors`, por lo que el Web App de Apps Script debe estar desplegado con acceso permitido para los usuarios que ejecutan la app.
