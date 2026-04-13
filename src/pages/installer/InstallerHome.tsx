@@ -4,14 +4,15 @@ import { auth } from "../../lib/firebase";
 import { useAuth } from "../../app/AuthProvider";
 import {
   createInstallation,
+  sendIdToAppsScript,
   updateInstallation,
 } from "../../services/installations.service";
 import {
   collection,
+  onSnapshot,
+  orderBy,
   query,
   where,
-  orderBy,
-  onSnapshot,
 } from "firebase/firestore";
 import { db } from "../../lib/firebase";
 import { getDayKey } from "../../utils/dayKey";
@@ -22,6 +23,7 @@ type InstallationItem = {
   observaciones: string;
   createdAt?: any;
 };
+
 function fmtTime(ts: any) {
   if (!ts?.toDate) return "";
   const d = ts.toDate() as Date;
@@ -42,6 +44,7 @@ export default function InstallerHome() {
   const [saving, setSaving] = useState(false);
   const [items, setItems] = useState<InstallationItem[]>([]);
   const [error, setError] = useState("");
+  const [successMessage, setSuccessMessage] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editIdInstalacion, setEditIdInstalacion] = useState("");
   const [editObservaciones, setEditObservaciones] = useState("");
@@ -78,24 +81,35 @@ export default function InstallerHome() {
 
     setSaving(true);
     setError("");
+    setSuccessMessage("");
 
     try {
+      const idValue = idInstalacion.trim();
+
       await createInstallation({
-        idInstalacion,
+        idInstalacion: idValue,
         observaciones,
         squadId: profile.squadId!,
         userId: user.uid,
       });
 
+      const scriptResult = await sendIdToAppsScript({
+        idInstalacion: idValue,
+        squadId: profile.squadId!,
+        userId: user.uid,
+      });
+
+      setSuccessMessage(`Registro guardado. ${scriptResult.message}`);
       setIdInstalacion("");
       setObservaciones("");
-    } catch (err) {
-      setError("Error al guardar la instalación");
+    } catch {
+      setError("Error al guardar la instalación o ejecutar el script.");
     } finally {
       setSaving(false);
     }
   }
-function startEdit(item: InstallationItem) {
+
+  function startEdit(item: InstallationItem) {
     setEditingId(item.id);
     setEditIdInstalacion(item.idInstalacion || "");
     setEditObservaciones(item.observaciones || "");
@@ -124,19 +138,18 @@ function startEdit(item: InstallationItem) {
         observaciones: editObservaciones,
       });
       cancelEdit();
-    } catch (err) {
+    } catch {
       setError("Error al editar la instalación");
     } finally {
       setSavingEdit(false);
     }
   }
+
   return (
     <div className="px-4 py-4 sm:p-6 space-y-4 sm:space-y-6 max-w-3xl mx-auto">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <h1 className="text-xl sm:text-2xl font-bold leading-tight">
-          {profile?.displayName}
-        </h1>
-        
+        <h1 className="text-xl sm:text-2xl font-bold leading-tight">{profile?.displayName}</h1>
+
         <button
           className="w-full sm:w-auto px-3 py-2 rounded-xl border"
           onClick={() => signOut(auth)}
@@ -151,6 +164,12 @@ function startEdit(item: InstallationItem) {
         {error && (
           <div className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-xl p-3">
             {error}
+          </div>
+        )}
+
+        {successMessage && (
+          <div className="text-sm text-green-700 bg-green-50 border border-green-200 rounded-xl p-3">
+            {successMessage}
           </div>
         )}
 
@@ -174,6 +193,10 @@ function startEdit(item: InstallationItem) {
           />
         </div>
 
+        <p className="text-xs text-gray-500">
+          Al guardar, se registra en Firestore y también se envía el ID al Apps Script (si está configurado).
+        </p>
+
         <button
           disabled={saving}
           className="w-full sm:w-auto rounded-xl bg-black text-white px-4 py-2 font-medium disabled:opacity-50"
@@ -186,13 +209,11 @@ function startEdit(item: InstallationItem) {
         <h2 className="font-semibold mb-3">Instalaciones de hoy</h2>
 
         {items.length === 0 ? (
-          <p className="text-sm text-gray-500">
-            Todavía no hay instalaciones cargadas.
-          </p>
+          <p className="text-sm text-gray-500">Todavía no hay instalaciones cargadas.</p>
         ) : (
           <ul className="space-y-2">
             {items.map((it, idx) => {
-              const next = items[idx + 1]; 
+              const next = items[idx + 1];
               const t1 = it.createdAt?.toDate?.() as Date | undefined;
               const t0 = next?.createdAt?.toDate?.() as Date | undefined;
 
@@ -208,12 +229,12 @@ function startEdit(item: InstallationItem) {
 
               return (
                 <li key={it.id} className="text-sm border rounded-xl p-3 space-y-2">
-                                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 sm:gap-3">
+                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 sm:gap-3">
                     <div className="font-medium">{isEditing ? "Editando" : it.idInstalacion}</div>
                     <div className="text-xs text-gray-500">{fmtTime(it.createdAt)}</div>
                   </div>
 
-{isEditing ? (
+                  {isEditing ? (
                     <>
                       <div className="space-y-2">
                         <label className="text-xs font-medium">ID de instalación</label>
@@ -239,7 +260,7 @@ function startEdit(item: InstallationItem) {
                         <button
                           type="button"
                           disabled={savingEdit}
-                          onClick={() => onSaveEdit(it.id)}
+                          onClick={() => void onSaveEdit(it.id)}
                           className="rounded-xl bg-black text-white px-3 py-2 font-medium disabled:opacity-50"
                         >
                           {savingEdit ? "Guardando..." : "Guardar cambios"}
@@ -255,15 +276,12 @@ function startEdit(item: InstallationItem) {
                     </>
                   ) : (
                     <>
-                      {it.observaciones && (
-                        <div className="text-gray-600 mt-1">{it.observaciones}</div>
-                      )}
+                      {it.observaciones && <div className="text-gray-600 mt-1">{it.observaciones}</div>}
 
                       <div className="flex flex-wrap items-center gap-2">
                         {gapText && (
                           <div className="text-xs text-gray-700 bg-gray-50 border rounded-lg px-2 py-1 inline-block">
-                            Tiempo desde la anterior:{" "}
-                            <span className="font-medium">{gapText}</span>
+                            Tiempo desde la anterior: <span className="font-medium">{gapText}</span>
                           </div>
                         )}
                         <button
