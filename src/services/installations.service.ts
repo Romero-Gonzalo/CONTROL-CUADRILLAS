@@ -126,13 +126,14 @@ export async function sendIdToAppsScript(params: ScriptPayload): Promise<ScriptE
     try {
       const response = await fetch(endpoint, {
         method: "POST",
+        mode: "no-cors",
         body: payload,
         headers: {
-          "Content-Type": "application/json",
+           "Content-Type": "text/plain;charset=utf-8",
         },
       });
 
-      if (!response.ok) {
+if (response.type !== "opaque" && !response.ok) {
         throw new Error(`Apps Script respondió ${response.status}`);
       }
 
