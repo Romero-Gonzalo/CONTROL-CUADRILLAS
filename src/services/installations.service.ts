@@ -85,6 +85,17 @@ export function getQueuedScriptSyncs(): ScriptPayload[] {
 export function clearQueuedScriptSyncs() {
   localStorage.removeItem(SCRIPT_SYNC_QUEUE_KEY);
 }
+function isValidAppsScriptWebAppUrl(endpoint: string) {
+  try {
+    const parsed = new URL(endpoint);
+    return (
+      parsed.hostname === "script.google.com" &&
+      /^\/macros\/s\/[^/]+\/exec\/?$/.test(parsed.pathname)
+    );
+  } catch {
+    return false;
+  }
+}
 
 export async function updateInstallationScriptSyncStatus(params: {
   id: string;
@@ -153,6 +164,11 @@ export async function sendIdToAppsScript(params: ScriptPayload): Promise<ScriptE
       message:
         "ID guardado en la app",
     };
+  }
+   if (!isValidAppsScriptWebAppUrl(endpoint)) {
+    throw new Error(
+      "VITE_APPS_SCRIPT_WEBAPP_URL inválida. Usa la URL de implementación /exec de script.google.com.",
+    );
   }
 if (postToAppsScriptWithForm(endpoint, params)) {
     return {
