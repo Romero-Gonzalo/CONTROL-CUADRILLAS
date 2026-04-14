@@ -102,6 +102,49 @@ function sleep(ms: number) {
   });
 }
 
+function postToAppsScriptWithForm(endpoint: string, payload: ScriptPayload) {
+  if (typeof document === "undefined") return false;
+
+  const iframeName = "apps-script-sync-target";
+  let iframe = document.getElementById(iframeName) as HTMLIFrameElement | null;
+
+  if (!iframe) {
+    iframe = document.createElement("iframe");
+    iframe.id = iframeName;
+    iframe.name = iframeName;
+    iframe.style.display = "none";
+    document.body.appendChild(iframe);
+  }
+
+  const form = document.createElement("form");
+  form.method = "POST";
+  form.action = endpoint;
+  form.target = iframeName;
+  form.style.display = "none";
+
+  const fields: Record<string, string> = {
+    idInstalacion: payload.idInstalacion.trim(),
+    squadId: payload.squadId,
+    userId: payload.userId,
+    source: "control-cuadrillas",
+  };
+
+  Object.entries(fields).forEach(([name, value]) => {
+    const input = document.createElement("input");
+    input.type = "hidden";
+    input.name = name;
+    input.value = value;
+    form.appendChild(input);
+  });
+
+  document.body.appendChild(form);
+  form.submit();
+  form.remove();
+
+  return true;
+}
+
+
 export async function sendIdToAppsScript(params: ScriptPayload): Promise<ScriptExecutionResult> {
   const endpoint = (import.meta.env.VITE_APPS_SCRIPT_WEBAPP_URL as string | undefined)?.trim();
   if (!endpoint) {
@@ -111,7 +154,12 @@ export async function sendIdToAppsScript(params: ScriptPayload): Promise<ScriptE
         "ID guardado en la app",
     };
   }
-
+if (postToAppsScriptWithForm(endpoint, params)) {
+    return {
+      sent: true,
+      message: "ID enviado al script de Google Sheets.",
+    };
+  }
   const payload = JSON.stringify({
     idInstalacion: params.idInstalacion.trim(),
     squadId: params.squadId,
