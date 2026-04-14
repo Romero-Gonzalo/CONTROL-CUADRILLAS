@@ -3,8 +3,12 @@ import { signOut } from "firebase/auth";
 import { auth } from "../../lib/firebase";
 import { useAuth } from "../../app/AuthProvider";
 import {
+  clearQueuedScriptSyncs,
   createInstallation,
+  getQueuedScriptSyncs,
+  queueScriptSync,
   sendIdToAppsScript,
+  updateInstallationScriptSyncStatus,
   updateInstallation,
 } from "../../services/installations.service";
 import {
@@ -71,6 +75,30 @@ export default function InstallerHome() {
     return () => unsub();
   }, [profile?.squadId]);
 
+  useEffect(() => {
+    if (!profile || !user) return;
+
+    async function flushScriptQueue() {
+      const pendingSyncs = getQueuedScriptSyncs();
+      if (pendingSyncs.length === 0) return;
+
+      const failedSyncs: typeof pendingSyncs = [];
+
+      for (const pendingSync of pendingSyncs) {
+        try {
+          await sendIdToAppsScript(pendingSync);
+        } catch {
+          failedSyncs.push(pendingSync);
+        }
+      }
+
+      clearQueuedScriptSyncs();
+      failedSyncs.forEach((item) => queueScriptSync(item));
+    }
+
+    flushScriptQueue();
+  }, [profile, user]);
+
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!idInstalacion.trim()) {
@@ -86,20 +114,41 @@ export default function InstallerHome() {
     try {
       const idValue = idInstalacion.trim();
 
-      await createInstallation({
+      const installationRef = await createInstallation({
         idInstalacion: idValue,
         observaciones,
         squadId: profile.squadId!,
         userId: user.uid,
       });
 
-      const scriptResult = await sendIdToAppsScript({
-        idInstalacion: idValue,
-        squadId: profile.squadId!,
-        userId: user.uid,
-      });
+      try {
+        const scriptResult = await sendIdToAppsScript({
+          idInstalacion: idValue,
+          squadId: profile.squadId!,
+          userId: user.uid,
+        });
 
-      setSuccessMessage(`Registro guardado. ${scriptResult.message}`);
+        await updateInstallationScriptSyncStatus({
+          id: installationRef.id,
+          status: scriptResult.sent ? "synced" : "pending",
+        });
+
+        setSuccessMessage(`Registro guardado. ${scriptResult.message}`);
+      } catch {
+        queueScriptSync({
+          idInstalacion: idValue,
+          squadId: profile.squadId!,
+          userId: user.uid,
+        });
+        await updateInstallationScriptSyncStatus({
+          id: installationRef.id,
+          status: "failed",
+        });
+        setSuccessMessage(
+          "Registro guardado. No se pudo sincronizar con Google Sheets ahora; se reintentará automáticamente.",
+        );
+      }
+
       setIdInstalacion("");
       setObservaciones("");
     } catch {
