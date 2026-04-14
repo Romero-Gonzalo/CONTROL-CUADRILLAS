@@ -108,7 +108,7 @@ export async function sendIdToAppsScript(params: ScriptPayload): Promise<ScriptE
     return {
       sent: false,
       message:
-        "ID guardado en la app. Falta configurar VITE_APPS_SCRIPT_WEBAPP_URL para enviar a Google Sheets.",
+        "ID guardado en la app",
     };
   }
 
