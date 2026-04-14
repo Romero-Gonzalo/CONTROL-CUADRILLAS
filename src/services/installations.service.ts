@@ -22,6 +22,7 @@ export async function createInstallation(params: {
     observaciones: observaciones.trim(),
     squadId,
     createdBy: userId,
+    scriptSyncStatus: "pending",
     dayKey: getDayKey(),
     createdAt: serverTimestamp(),
   });
@@ -49,11 +50,59 @@ type ScriptExecutionResult = {
   message: string;
 };
 
-export async function sendIdToAppsScript(params: {
+type ScriptPayload = {
   idInstalacion: string;
   squadId: string;
   userId: string;
-}): Promise<ScriptExecutionResult> {
+};
+
+const SCRIPT_SYNC_QUEUE_KEY = "installations-script-sync-queue";
+
+export function queueScriptSync(payload: ScriptPayload) {
+  const queue = getQueuedScriptSyncs();
+  queue.push(payload);
+  localStorage.setItem(SCRIPT_SYNC_QUEUE_KEY, JSON.stringify(queue));
+}
+
+export function getQueuedScriptSyncs(): ScriptPayload[] {
+  const rawQueue = localStorage.getItem(SCRIPT_SYNC_QUEUE_KEY);
+  if (!rawQueue) return [];
+
+  try {
+    const parsed = JSON.parse(rawQueue);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(
+      (item) =>
+        typeof item?.idInstalacion === "string" &&
+        typeof item?.squadId === "string" &&
+        typeof item?.userId === "string",
+    );
+  } catch {
+    return [];
+  }
+}
+
+export function clearQueuedScriptSyncs() {
+  localStorage.removeItem(SCRIPT_SYNC_QUEUE_KEY);
+}
+
+export async function updateInstallationScriptSyncStatus(params: {
+  id: string;
+  status: "pending" | "synced" | "failed";
+}) {
+  return updateDoc(doc(db, "installations", params.id), {
+    scriptSyncStatus: params.status,
+    scriptSyncUpdatedAt: serverTimestamp(),
+  });
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
+export async function sendIdToAppsScript(params: ScriptPayload): Promise<ScriptExecutionResult> {
   const endpoint = (import.meta.env.VITE_APPS_SCRIPT_WEBAPP_URL as string | undefined)?.trim();
   if (!endpoint) {
     return {
@@ -63,25 +112,41 @@ export async function sendIdToAppsScript(params: {
     };
   }
 
-  const payload = new URLSearchParams({
+  const payload = JSON.stringify({
     idInstalacion: params.idInstalacion.trim(),
     squadId: params.squadId,
     userId: params.userId,
     source: "control-cuadrillas",
   });
 
-  const response = await fetch(endpoint, {
-    method: "POST",
-    body: payload,
-    mode: "no-cors",
-  });
+  const maxRetries = 3;
+  let lastError: Error | null = null;
 
-  if (response.type !== "opaque" && !response.ok) {
-    throw new Error(`Apps Script respondió ${response.status}`);
+  for (let attempt = 0; attempt < maxRetries; attempt += 1) {
+    try {
+      const response = await fetch(endpoint, {
+        method: "POST",
+        body: payload,
+        headers: {
+          "Content-Type": "application/json",
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error(`Apps Script respondió ${response.status}`);
+      }
+
+      return {
+        sent: true,
+        message: "ID enviado al script de Google Sheets.",
+      };
+    } catch (error) {
+      lastError = error as Error;
+      if (attempt < maxRetries - 1) {
+        await sleep(500 * (attempt + 1));
+      }
+    }
   }
 
-  return {
-    sent: true,
-    message: "ID enviado al script de Google Sheets.",
-  };
+  throw lastError ?? new Error("No se pudo sincronizar con Apps Script");
 }
