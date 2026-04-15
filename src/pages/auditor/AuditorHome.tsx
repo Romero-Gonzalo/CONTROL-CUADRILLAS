@@ -15,7 +15,11 @@ import {
   where,
 } from "firebase/firestore";
 import { getDayKey } from "../../utils/dayKey";
-import { deleteInstallation, updateInstallation } from "../../services/installations.service";
+import {
+  createPreloadedInstallations,
+  deleteInstallation,
+  updateInstallation,
+} from "../../services/installations.service";
 
 type Squad = {
   id: string;
@@ -220,7 +224,7 @@ function monthKeyFromDate(date: Date) {
   return `${y}-${m}`;
 }
 export default function AuditorHome() {
-  const { profile } = useAuth();
+  const { profile, user } = useAuth();
 
   const [squads, setSquads] = useState<Squad[]>([]);
   const [installations, setInstallations] = useState<InstallationItem[]>([]);
@@ -254,6 +258,9 @@ const [rangeFrom, setRangeFrom] = useState(() => {
   const [squadObservationsById, setSquadObservationsById] = useState<Record<string, string>>({});
   const [squadObservationDraft, setSquadObservationDraft] = useState("");
   const [savingSquadObservation, setSavingSquadObservation] = useState(false);
+  const [preloadIdsInput, setPreloadIdsInput] = useState("");
+  const [savingPreload, setSavingPreload] = useState(false);
+  const [preloadResultMessage, setPreloadResultMessage] = useState("");
   const installationRefs = useRef<Record<string, HTMLLIElement | null>>({});
 
   const dayKey = useMemo(() => dayInput, [dayInput]);
@@ -669,6 +676,59 @@ const startEdit = (item: InstallationItem) => {
       setActionError("No se pudo guardar la observación de la cuadrilla.");
     } finally {
       setSavingSquadObservation(false);
+    }
+  };
+
+  const preloadInstallationsForSquad = async () => {
+    if (!selectedSquadId || !user?.uid) return;
+
+    const candidateIds = preloadIdsInput
+      .split(/[\n,;]+/g)
+      .map((value) => value.trim())
+      .filter(Boolean);
+
+    if (candidateIds.length === 0) {
+      setActionError("Ingresá al menos un ID para precargar.");
+      return;
+    }
+
+    const existingIds = new Set(
+      installations
+        .filter((it) => it.squadId === selectedSquadId)
+        .map((it) => normalizeInstallationId(it.idInstalacion)),
+    );
+
+    const uniqueIds = Array.from(
+      new Set(candidateIds.map((value) => value.toUpperCase())),
+    );
+    const idsToCreate = uniqueIds.filter(
+      (idInstalacion) => !existingIds.has(normalizeInstallationId(idInstalacion)),
+    );
+
+    setSavingPreload(true);
+    setActionError("");
+    setPreloadResultMessage("");
+
+    try {
+      const { created } = await createPreloadedInstallations({
+        squadId: selectedSquadId,
+        userId: user.uid,
+        ids: idsToCreate,
+        dayKey,
+      });
+
+      const skipped = uniqueIds.length - created;
+      setPreloadResultMessage(
+        `Precarga lista: ${created} ID(s) creados${
+          skipped > 0 ? `, ${skipped} omitidos por duplicado` : ""
+        }.`,
+      );
+      setPreloadIdsInput("");
+    } catch (error) {
+      console.error(error);
+      setActionError("No se pudieron precargar las instalaciones.");
+    } finally {
+      setSavingPreload(false);
     }
   };
 
@@ -1116,6 +1176,36 @@ const buildPdfLines = (rows: InstallationItem[], title: string) => {
              {actionError && (
             <div className="mb-3 text-sm text-red-700 bg-red-50 border border-red-200 rounded-xl p-2.5">
               {actionError}
+            </div>
+          )}
+
+{selectedSquadId && (
+            <div className="mb-4 rounded-xl border bg-blue-50/50 p-3 space-y-2">
+              <div>
+                <p className="text-sm font-medium">Precargar pendientes para cuadrilla</p>
+                <p className="text-xs text-gray-600">
+                  Cargá IDs separados por coma o salto de línea. Se crearán como pendientes para hoy.
+                </p>
+              </div>
+              <textarea
+                className="w-full border rounded-xl px-3 py-2 text-sm min-h-24 bg-white"
+                value={preloadIdsInput}
+                onChange={(e) => setPreloadIdsInput(e.target.value)}
+                placeholder={"IPT-001\nIPT-002\nIPT-003"}
+              />
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={preloadInstallationsForSquad}
+                  disabled={savingPreload}
+                  className="rounded-lg bg-black text-white px-3 py-2 text-sm font-medium disabled:opacity-50"
+                >
+                  {savingPreload ? "Precargando..." : "Precargar pendientes"}
+                </button>
+                {preloadResultMessage && (
+                  <span className="text-xs text-green-700">{preloadResultMessage}</span>
+                )}
+              </div>
             </div>
           )}
 
