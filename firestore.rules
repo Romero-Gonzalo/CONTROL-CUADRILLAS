@@ -34,31 +34,33 @@ service cloud.firestore {
       allow write: if isAuditor();
     }
 
-    // INSTALLATIONS:
-    match /installations/{docId} {
+   match /installations/{docId} {
 
-      // leer: auditor ve todo; instalador solo su cuadrilla
-      allow read: if isAuditor()
-        || (isInstaller() && resource.data.squadId == mySquadId());
+  // leer: auditor ve todo; instalador solo su cuadrilla
+  allow read: if isAuditor()
+    || (isInstaller() && resource.data.squadId == mySquadId());
 
-      // crear: instalador solo puede crear con su squadId y su uid
-      allow create: if isInstaller()
-        && request.resource.data.squadId == mySquadId()
-        && request.resource.data.createdBy == request.auth.uid;
+  // crear:
+  // - auditor puede crear (precarga)
+  // - instalador puede crear solo su cuadrilla y con su uid como createdBy
+  allow create: if isAuditor()
+    || (isInstaller()
+      && request.resource.data.squadId == mySquadId()
+      && request.resource.data.createdBy == request.auth.uid);
 
-      // editar: auditor siempre; instalador solo su cuadrilla y dentro de 24h de creación
-      allow update: if isAuditor()
-        || (isInstaller()
-          && resource.data.squadId == mySquadId()
-          && resource.data.createdBy == request.auth.uid
-          && request.resource.data.squadId == resource.data.squadId
-          && request.resource.data.createdBy == resource.data.createdBy
-          && request.resource.data.dayKey == resource.data.dayKey
-          && request.resource.data.createdAt == resource.data.createdAt
-          && request.time < resource.data.createdAt + duration.value(24, "h"));
+  // actualizar:
+  // - auditor siempre
+  // - instalador: solo su cuadrilla, sin cambiar datos base
+  allow update: if isAuditor()
+    || (isInstaller()
+      && resource.data.squadId == mySquadId()
+      && request.resource.data.squadId == resource.data.squadId
+      && request.resource.data.dayKey == resource.data.dayKey
+      && request.resource.data.createdAt == resource.data.createdAt
+      && request.time < resource.data.createdAt + duration.value(24, "h"));
 
-      allow delete: if isAuditor();
-    }
+  allow delete: if isAuditor();
+}
     // OBSERVACION GENERAL POR DIA (una por dayKey)
     match /dailyObservations/{dayKey} {
       allow read: if signedIn();
