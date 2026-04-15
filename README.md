@@ -72,14 +72,12 @@ export default defineConfig([
 ])
 ```
 
-## Integración opcional con Google Sheets (Apps Script)
+## Integración con Make (webhook)
 
-Para que el flujo de instalador también envíe el ID al script de Google Sheets, configurar en `.env`:
+Para enviar cada instalación al webhook de Make desde el flujo de instalador, podés configurar en `.env`:
 
 ```bash
-VITE_APPS_SCRIPT_WEBAPP_URL="https://script.google.com/macros/s/TU_WEB_APP_ID/exec"
+VITE_MAKE_WEBHOOK_URL="https://hook.us2.make.com/TU_WEBHOOK"
 ```
 
-Si la variable no está configurada, el ID igual se guarda en Firestore, pero no se envía al Apps Script.
-
-> Nota: el envío desde navegador se realiza en modo `no-cors`, por lo que el Web App de Apps Script debe estar desplegado con acceso permitido para los usuarios que ejecutan la app.
+Si la variable no está configurada, la app usa el webhook por defecto definido en `src/services/makeWebhook.service.ts`.
