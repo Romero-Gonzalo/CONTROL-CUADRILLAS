@@ -4,6 +4,7 @@ import { auth } from "../../lib/firebase";
 import { useAuth } from "../../app/AuthProvider";
 import {
   createInstallation,
+  updateInstallationWorkflow,
   updateInstallation,
 } from "../../services/installations.service";
 import {
@@ -16,11 +17,15 @@ import {
 import { db } from "../../lib/firebase";
 import { getDayKey } from "../../utils/dayKey";
 import { getReadableNowTimestamp, sendInstallationToMake } from "../../services/makeWebhook.service";
+import type { WorkflowStatus } from "../../types/installationStatus";
 
 type InstallationItem = {
   id: string;
   idInstalacion: string;
   observaciones: string;
+  workflowStatus?: WorkflowStatus;
+  resolutionComment?: string;
+  source?: string;
   createdAt?: any;
 };
 
@@ -49,6 +54,9 @@ export default function InstallerHome() {
   const [editIdInstalacion, setEditIdInstalacion] = useState("");
   const [editObservaciones, setEditObservaciones] = useState("");
   const [savingEdit, setSavingEdit] = useState(false);
+  const [workflowError, setWorkflowError] = useState("");
+  const [resolutionDrafts, setResolutionDrafts] = useState<Record<string, string>>({});
+  const [savingWorkflowId, setSavingWorkflowId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!profile?.squadId) return;
@@ -82,6 +90,7 @@ export default function InstallerHome() {
     setSaving(true);
     setError("");
     setSuccessMessage("");
+    setWorkflowError("");
 
     try {
       const idValue = idInstalacion.trim();
@@ -158,6 +167,36 @@ export default function InstallerHome() {
     }
   }
 
+  async function onSetWorkflowStatus(item: InstallationItem, status: WorkflowStatus) {
+    const resolutionComment = (resolutionDrafts[item.id] ?? "").trim();
+
+    if (status !== "SOLUCIONADO" && !resolutionComment) {
+      setWorkflowError("Para No solucionado o Rechazado, el comentario es obligatorio.");
+      return;
+    }
+
+    if (!user) return;
+
+    setSavingWorkflowId(item.id);
+    setWorkflowError("");
+    setError("");
+
+    try {
+      await updateInstallationWorkflow({
+        id: item.id,
+        workflowStatus: status,
+        resolutionComment,
+        resolvedBy: user.uid,
+      });
+    } catch {
+      setWorkflowError("No se pudo actualizar el estado de la instalación.");
+    } finally {
+      setSavingWorkflowId(null);
+    }
+  }
+
+  const pendingItems = items.filter((item) => (item.workflowStatus ?? "PENDIENTE") === "PENDIENTE");
+
   return (
     <div className="px-4 py-4 sm:p-6 space-y-4 sm:space-y-6 max-w-3xl mx-auto">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -219,6 +258,74 @@ export default function InstallerHome() {
       </form>
 
       <div className="rounded-2xl border p-4">
+        <h2 className="font-semibold mb-3">Instalaciones pendientes asignadas</h2>
+
+        {workflowError && (
+          <div className="mb-3 text-sm text-red-700 bg-red-50 border border-red-200 rounded-xl p-3">
+            {workflowError}
+          </div>
+        )}
+
+        {pendingItems.length === 0 ? (
+          <p className="text-sm text-gray-500">
+            No hay pendientes asignadas para hoy.
+          </p>
+        ) : (
+          <ul className="space-y-2">
+            {pendingItems.map((it) => (
+              <li key={it.id} className="text-sm border rounded-xl p-3 space-y-2">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 sm:gap-3">
+                  <div className="font-medium">{it.idInstalacion}</div>
+                  <div className="text-xs text-gray-500">
+                    {it.source === "AUDITOR_PRELOAD" ? "Asignada por auditor" : "Carga manual"}
+                  </div>
+                </div>
+
+                <textarea
+                  className="w-full border rounded-xl px-3 py-2"
+                  value={resolutionDrafts[it.id] ?? ""}
+                  onChange={(e) =>
+                    setResolutionDrafts((prev) => ({
+                      ...prev,
+                      [it.id]: e.target.value,
+                    }))
+                  }
+                  placeholder="Comentario (obligatorio para no solucionado/rechazado)"
+                />
+
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    disabled={savingWorkflowId === it.id}
+                    onClick={() => void onSetWorkflowStatus(it, "SOLUCIONADO")}
+                    className="rounded-lg border border-green-300 text-green-800 px-3 py-1.5 text-xs"
+                  >
+                    Solucionado
+                  </button>
+                  <button
+                    type="button"
+                    disabled={savingWorkflowId === it.id}
+                    onClick={() => void onSetWorkflowStatus(it, "NO_SOLUCIONADO")}
+                    className="rounded-lg border border-yellow-300 text-yellow-800 px-3 py-1.5 text-xs"
+                  >
+                    No solucionado
+                  </button>
+                  <button
+                    type="button"
+                    disabled={savingWorkflowId === it.id}
+                    onClick={() => void onSetWorkflowStatus(it, "RECHAZADO")}
+                    className="rounded-lg border border-red-300 text-red-700 px-3 py-1.5 text-xs"
+                  >
+                    Rechazado
+                  </button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
+      <div className="rounded-2xl border p-4">
         <h2 className="font-semibold mb-3">Instalaciones de hoy</h2>
 
         {items.length === 0 ? (
@@ -244,7 +351,12 @@ export default function InstallerHome() {
                 <li key={it.id} className="text-sm border rounded-xl p-3 space-y-2">
                   <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 sm:gap-3">
                     <div className="font-medium">{isEditing ? "Editando" : it.idInstalacion}</div>
-                    <div className="text-xs text-gray-500">{fmtTime(it.createdAt)}</div>
+                    <div className="text-xs text-gray-500 flex items-center gap-2">
+                      <span>{fmtTime(it.createdAt)}</span>
+                      <span className="border rounded px-1.5 py-0.5">
+                        {it.workflowStatus ?? "PENDIENTE"}
+                      </span>
+                    </div>
                   </div>
 
                   {isEditing ? (
