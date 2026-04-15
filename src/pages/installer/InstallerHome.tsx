@@ -3,12 +3,7 @@ import { signOut } from "firebase/auth";
 import { auth } from "../../lib/firebase";
 import { useAuth } from "../../app/AuthProvider";
 import {
-  clearQueuedScriptSyncs,
   createInstallation,
-  getQueuedScriptSyncs,
-  queueScriptSync,
-  sendIdToAppsScript,
-  updateInstallationScriptSyncStatus,
   updateInstallation,
 } from "../../services/installations.service";
 import {
@@ -76,30 +71,6 @@ export default function InstallerHome() {
     return () => unsub();
   }, [profile?.squadId]);
 
-  useEffect(() => {
-    if (!profile || !user) return;
-
-    async function flushScriptQueue() {
-      const pendingSyncs = getQueuedScriptSyncs();
-      if (pendingSyncs.length === 0) return;
-
-      const failedSyncs: typeof pendingSyncs = [];
-
-      for (const pendingSync of pendingSyncs) {
-        try {
-          await sendIdToAppsScript(pendingSync);
-        } catch {
-          failedSyncs.push(pendingSync);
-        }
-      }
-
-      clearQueuedScriptSyncs();
-      failedSyncs.forEach((item) => queueScriptSync(item));
-    }
-
-    flushScriptQueue();
-  }, [profile, user]);
-
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!idInstalacion.trim()) {
@@ -124,7 +95,7 @@ export default function InstallerHome() {
         dayKey,
       };
 
-      const installationRef = await createInstallation({
+      await createInstallation({
         idInstalacion: idValue,
         observaciones,
         squadId: profile.squadId!,
@@ -140,38 +111,12 @@ export default function InstallerHome() {
         });
       }
 
-      try {
-        const scriptResult = await sendIdToAppsScript({
-          idInstalacion: idValue,
-          squadId: profile.squadId!,
-          userId: user.uid,
-        });
-
-        await updateInstallationScriptSyncStatus({
-          id: installationRef.id,
-          status: scriptResult.sent ? "synced" : "pending",
-        });
-
-        setSuccessMessage(`Registro guardado. ${scriptResult.message}`);
-      } catch {
-        queueScriptSync({
-          idInstalacion: idValue,
-          squadId: profile.squadId!,
-          userId: user.uid,
-        });
-        await updateInstallationScriptSyncStatus({
-          id: installationRef.id,
-          status: "failed",
-        });
-        setSuccessMessage(
-          "Registro guardado. No se pudo sincronizar con Google Sheets ahora; se reintentará automáticamente.",
-        );
-      }
+      setSuccessMessage("Registro guardado.");
 
       setIdInstalacion("");
       setObservaciones("");
     } catch {
-      setError("Error al guardar la instalación o ejecutar el script.");
+      setError("Error al guardar la instalación.");
     } finally {
       setSaving(false);
     }
@@ -262,7 +207,7 @@ export default function InstallerHome() {
         </div>
 
         <p className="text-xs text-gray-500">
-          Al guardar, se registra en Firestore y también se envía el ID al Apps Script (si está configurado).
+          Al guardar, se registra en Firestore y también se envía el registro al webhook de Make.
         </p>
 
         <button
