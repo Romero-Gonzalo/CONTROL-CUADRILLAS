@@ -7,6 +7,8 @@ export type MakeInstallationPayload = {
   dayKey: string;
 };
 
+type MakeDeliveryMode = "cors-json" | "no-cors-text";
+
 const DEFAULT_MAKE_WEBHOOK_URL =
   "https://hook.us2.make.com/v23jm0lxoyl5761tqns5eziefxbkczws";
 
@@ -25,8 +27,7 @@ export function getReadableNowTimestamp(date = new Date()) {
   return `${year}-${month}-${day} ${hours}:${minutes}`;
 }
 
-export async function sendInstallationToMake(payload: MakeInstallationPayload) {
-  const endpoint = resolveMakeWebhookUrl();
+async function sendWithCorsJson(endpoint: string, payload: MakeInstallationPayload) {
   const response = await fetch(endpoint, {
     method: "POST",
     headers: {
@@ -40,5 +41,43 @@ export async function sendInstallationToMake(payload: MakeInstallationPayload) {
     throw new Error(
       `Make webhook respondió ${response.status} ${response.statusText}. Body: ${responseBody}`,
     );
+  }
+}
+
+async function sendWithNoCorsFallback(endpoint: string, payload: MakeInstallationPayload) {
+  await fetch(endpoint, {
+    method: "POST",
+    mode: "no-cors",
+    headers: {
+      "Content-Type": "text/plain;charset=utf-8",
+    },
+    body: JSON.stringify(payload),
+  });
+}
+
+function shouldUseNoCorsFallback(error: unknown) {
+  if (!(error instanceof Error)) return false;
+
+  return (
+    error.message.includes("403") ||
+    error.message.includes("405") ||
+    error.message.includes("Failed to fetch") ||
+    error.message.includes("NetworkError")
+  );
+}
+
+export async function sendInstallationToMake(
+  payload: MakeInstallationPayload,
+): Promise<{ mode: MakeDeliveryMode }> {
+  const endpoint = resolveMakeWebhookUrl();
+
+  try {
+    await sendWithCorsJson(endpoint, payload);
+    return { mode: "cors-json" };
+  } catch (error) {
+    if (!shouldUseNoCorsFallback(error)) throw error;
+
+    await sendWithNoCorsFallback(endpoint, payload);
+    return { mode: "no-cors-text" };
   }
 }
