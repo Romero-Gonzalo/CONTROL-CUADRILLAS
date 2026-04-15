@@ -20,6 +20,7 @@ import {
 } from "firebase/firestore";
 import { db } from "../../lib/firebase";
 import { getDayKey } from "../../utils/dayKey";
+import { getReadableNowTimestamp, sendInstallationToMake } from "../../services/makeWebhook.service";
 
 type InstallationItem = {
   id: string;
@@ -113,6 +114,15 @@ export default function InstallerHome() {
 
     try {
       const idValue = idInstalacion.trim();
+      const dayKey = getDayKey();
+      const makePayload = {
+        fecha: getReadableNowTimestamp(),
+        cuadrilla: profile.squadId || profile.displayName || "",
+        idInstalacion: idValue,
+        observaciones: observaciones.trim(),
+        usuario: profile.displayName || user.email || user.uid,
+        dayKey,
+      };
 
       const installationRef = await createInstallation({
         idInstalacion: idValue,
@@ -120,6 +130,15 @@ export default function InstallerHome() {
         squadId: profile.squadId!,
         userId: user.uid,
       });
+
+      try {
+        await sendInstallationToMake(makePayload);
+      } catch (error) {
+        console.error("Error enviando instalación al webhook de Make:", {
+          error,
+          payload: makePayload,
+        });
+      }
 
       try {
         const scriptResult = await sendIdToAppsScript({
