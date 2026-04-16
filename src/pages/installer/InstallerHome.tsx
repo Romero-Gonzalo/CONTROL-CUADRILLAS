@@ -102,6 +102,8 @@ export default function InstallerHome() {
         observaciones: observaciones.trim(),
         usuario: profile.displayName || user.email || user.uid,
         dayKey,
+        estado: "PENDIENTE" as const,
+        origen: "INSTALADOR" as const,
       };
 
       await createInstallation({

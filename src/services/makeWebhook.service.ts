@@ -5,6 +5,8 @@ export type MakeInstallationPayload = {
   observaciones: string;
   usuario: string;
   dayKey: string;
+  estado: "PENDIENTE" | "SOLUCIONADO" | "NO_SOLUCIONADO" | "RECHAZADO";
+  origen: "INSTALADOR" | "AUDITOR";
 };
 
 type MakeDeliveryMode = "cors-json" | "no-cors-text";
