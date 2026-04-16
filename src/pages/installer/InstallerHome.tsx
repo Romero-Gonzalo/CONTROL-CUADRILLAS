@@ -190,6 +190,28 @@ export default function InstallerHome() {
         resolutionComment,
         resolvedBy: user.uid,
       });
+
+      if (profile) {
+        const makePayload = {
+          fecha: getReadableNowTimestamp(),
+          cuadrilla: profile.squadId || profile.displayName || "",
+          idInstalacion: item.idInstalacion,
+          observaciones: resolutionComment || item.observaciones || "",
+          usuario: profile.displayName || user.email || user.uid,
+          dayKey: getDayKey(),
+          estado: status,
+          origen: "INSTALADOR" as const,
+        };
+
+        try {
+          await sendInstallationToMake(makePayload);
+        } catch (error) {
+          console.error("Error enviando actualización de estado al webhook de Make:", {
+            error,
+            payload: makePayload,
+          });
+        }
+      }
     } catch {
       setWorkflowError("No se pudo actualizar el estado de la instalación.");
     } finally {
