@@ -529,17 +529,41 @@ useEffect(() => {
 
     const stats: Record<
       string,
-      { count: number; lastAt: any | null; avgGapMin: number; maxGapMin: number }
+      {
+        count: number;
+        lastAt: any | null;
+        avgGapMin: number;
+        maxGapMin: number;
+        status: {
+          SOLUCIONADO: number;
+          NO_SOLUCIONADO: number;
+          RECHAZADO: number;
+        };
+      }
     > = {};
 
     for (const sid of Object.keys(groups)) {
       const list = groups[sid];
       const gaps = calcGapsDesc(list);
+      const status = {
+        SOLUCIONADO: 0,
+        NO_SOLUCIONADO: 0,
+        RECHAZADO: 0,
+      };
+
+      list.forEach((it) => {
+        const key = getEffectiveWorkflowStatus(it);
+        if (key === "SOLUCIONADO" || key === "NO_SOLUCIONADO" || key === "RECHAZADO") {
+          status[key] += 1;
+        }
+      });
+
       stats[sid] = {
         count: list.length,
         lastAt: list[0]?.createdAt ?? null,
         avgGapMin: avg(gaps),
         maxGapMin: max(gaps),
+        status,
       };
     }
 
@@ -1225,7 +1249,13 @@ const buildPdfLines = (rows: InstallationItem[], title: string) => {
 
           <div className="space-y-1.5 sm:space-y-2">
             {squads.map((s) => {
-              const st = squadStats[s.id] ?? { count: 0, lastAt: null, avgGapMin: 0, maxGapMin: 0 };
+              const st = squadStats[s.id] ?? {
+                count: 0,
+                lastAt: null,
+                avgGapMin: 0,
+                maxGapMin: 0,
+                status: { SOLUCIONADO: 0, NO_SOLUCIONADO: 0, RECHAZADO: 0 },
+              };
               const active = selectedSquadId === s.id;
 
               return (
@@ -1246,6 +1276,9 @@ const buildPdfLines = (rows: InstallationItem[], title: string) => {
                     <div className="font-bold text-sm">{st.count}</div>
                     <div className={active ? "text-white/70 text-xs" : "text-gray-500 text-xs"}>prom: {st.avgGapMin ? fmtGapMinutes(st.avgGapMin) : "-"}</div>
                     <div className={active ? "text-white/70 text-xs" : "text-gray-500 text-xs"}>max: {st.maxGapMin ? fmtGapMinutes(st.maxGapMin) : "-"}</div>
+                    <div className={active ? "text-white/90 text-[11px] mt-1" : "text-gray-600 text-[11px] mt-1"}>
+                      S:{st.status.SOLUCIONADO} R:{st.status.RECHAZADO} NS:{st.status.NO_SOLUCIONADO}
+                    </div>
                   </div>
                 </button>
               );
