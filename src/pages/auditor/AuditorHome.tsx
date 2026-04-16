@@ -15,7 +15,11 @@ import {
   where,
 } from "firebase/firestore";
 import { getDayKey } from "../../utils/dayKey";
-import { deleteInstallation, updateInstallation } from "../../services/installations.service";
+import {
+  createPreloadedInstallations,
+  deleteInstallation,
+  updateInstallation,
+} from "../../services/installations.service";
 
 type Squad = {
   id: string;
@@ -28,6 +32,8 @@ type InstallationItem = {
   idInstalacion: string;
   observaciones: string;
   squadId: string;
+  workflowStatus?: "PENDIENTE" | "SOLUCIONADO" | "NO_SOLUCIONADO" | "RECHAZADO";
+  resolutionComment?: string;
   createdAt?: any;
 };
 type DayObservation = {
@@ -44,6 +50,35 @@ function getAlertLevel(diffMin: number): Exclude<AlertLevel, "all"> {
   if (diffMin >= 120) return "critical";
   if (diffMin >= 60) return "delay";
   return "normal";
+}
+
+function getWorkflowStatusMeta(status?: InstallationItem["workflowStatus"]) {
+  switch (status) {
+    case "SOLUCIONADO":
+      return {
+        label: "Solucionado",
+        chipClass: "bg-green-50 border-green-200 text-green-700",
+        rowClass: "border-green-200 bg-green-50/30",
+      };
+    case "NO_SOLUCIONADO":
+      return {
+        label: "No solucionado",
+        chipClass: "bg-yellow-50 border-yellow-200 text-yellow-800",
+        rowClass: "border-yellow-200 bg-yellow-50/30",
+      };
+    case "RECHAZADO":
+      return {
+        label: "Rechazado",
+        chipClass: "bg-red-50 border-red-200 text-red-700",
+        rowClass: "border-red-200 bg-red-50/30",
+      };
+    default:
+      return {
+        label: "Pendiente",
+        chipClass: "bg-gray-50 border-gray-200 text-gray-700",
+        rowClass: "",
+      };
+  }
 }
 
 function normalizeInstallationId(value: string) {
@@ -220,7 +255,7 @@ function monthKeyFromDate(date: Date) {
   return `${y}-${m}`;
 }
 export default function AuditorHome() {
-  const { profile } = useAuth();
+  const { profile, user } = useAuth();
 
   const [squads, setSquads] = useState<Squad[]>([]);
   const [installations, setInstallations] = useState<InstallationItem[]>([]);
@@ -254,6 +289,9 @@ const [rangeFrom, setRangeFrom] = useState(() => {
   const [squadObservationsById, setSquadObservationsById] = useState<Record<string, string>>({});
   const [squadObservationDraft, setSquadObservationDraft] = useState("");
   const [savingSquadObservation, setSavingSquadObservation] = useState(false);
+  const [preloadIdsInput, setPreloadIdsInput] = useState("");
+  const [savingPreload, setSavingPreload] = useState(false);
+  const [preloadResultMessage, setPreloadResultMessage] = useState("");
   const installationRefs = useRef<Record<string, HTMLLIElement | null>>({});
 
   const dayKey = useMemo(() => dayInput, [dayInput]);
@@ -543,6 +581,22 @@ useEffect(() => {
     return selectedItemsWithGap.filter((row) => row.level === alertFilter);
   }, [alertFilter, selectedItemsWithGap]);
 
+  const selectedStatusStats = useMemo(() => {
+    const stats = {
+      PENDIENTE: 0,
+      SOLUCIONADO: 0,
+      NO_SOLUCIONADO: 0,
+      RECHAZADO: 0,
+    };
+
+    selectedList.forEach((it) => {
+      const key = (it.workflowStatus ?? "PENDIENTE") as keyof typeof stats;
+      stats[key] += 1;
+    });
+
+    return stats;
+  }, [selectedList]);
+
   useEffect(() => {
     if (!pendingScrollInstallationId) return;
 
@@ -669,6 +723,59 @@ const startEdit = (item: InstallationItem) => {
       setActionError("No se pudo guardar la observación de la cuadrilla.");
     } finally {
       setSavingSquadObservation(false);
+    }
+  };
+
+  const preloadInstallationsForSquad = async () => {
+    if (!selectedSquadId || !user?.uid) return;
+
+    const candidateIds = preloadIdsInput
+      .split(/[\n,;]+/g)
+      .map((value) => value.trim())
+      .filter(Boolean);
+
+    if (candidateIds.length === 0) {
+      setActionError("Ingresá al menos un ID para precargar.");
+      return;
+    }
+
+    const existingIds = new Set(
+      installations
+        .filter((it) => it.squadId === selectedSquadId)
+        .map((it) => normalizeInstallationId(it.idInstalacion)),
+    );
+
+    const uniqueIds = Array.from(
+      new Set(candidateIds.map((value) => value.toUpperCase())),
+    );
+    const idsToCreate = uniqueIds.filter(
+      (idInstalacion) => !existingIds.has(normalizeInstallationId(idInstalacion)),
+    );
+
+    setSavingPreload(true);
+    setActionError("");
+    setPreloadResultMessage("");
+
+    try {
+      const { created } = await createPreloadedInstallations({
+        squadId: selectedSquadId,
+        userId: user.uid,
+        ids: idsToCreate,
+        dayKey,
+      });
+
+      const skipped = uniqueIds.length - created;
+      setPreloadResultMessage(
+        `Precarga lista: ${created} ID(s) creados${
+          skipped > 0 ? `, ${skipped} omitidos por duplicado` : ""
+        }.`,
+      );
+      setPreloadIdsInput("");
+    } catch (error) {
+      console.error(error);
+      setActionError("No se pudieron precargar las instalaciones.");
+    } finally {
+      setSavingPreload(false);
     }
   };
 
@@ -923,6 +1030,27 @@ const buildPdfLines = (rows: InstallationItem[], title: string) => {
             <p className="text-sm font-medium">Observación general del día</p>
             <p className="text-xs text-gray-500">Ej: lluvia, falta de material o cualquier incidencia general.</p>
           </div>
+
+          {selectedSquadId && (
+            <div className="mb-4 grid grid-cols-2 sm:grid-cols-4 gap-2">
+              <div className="rounded-lg border bg-gray-50 px-3 py-2">
+                <div className="text-[11px] text-gray-500">Pendientes</div>
+                <div className="text-sm font-semibold">{selectedStatusStats.PENDIENTE}</div>
+              </div>
+              <div className="rounded-lg border border-green-200 bg-green-50 px-3 py-2">
+                <div className="text-[11px] text-green-700">Solucionadas</div>
+                <div className="text-sm font-semibold text-green-800">{selectedStatusStats.SOLUCIONADO}</div>
+              </div>
+              <div className="rounded-lg border border-yellow-200 bg-yellow-50 px-3 py-2">
+                <div className="text-[11px] text-yellow-700">No solucionadas</div>
+                <div className="text-sm font-semibold text-yellow-800">{selectedStatusStats.NO_SOLUCIONADO}</div>
+              </div>
+              <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2">
+                <div className="text-[11px] text-red-700">Rechazadas</div>
+                <div className="text-sm font-semibold text-red-800">{selectedStatusStats.RECHAZADO}</div>
+              </div>
+            </div>
+          )}
           <textarea
             className="w-full border rounded-xl px-3 py-2 text-sm min-h-24"
             value={dayObservation}
@@ -1120,6 +1248,36 @@ const buildPdfLines = (rows: InstallationItem[], title: string) => {
           )}
 
 {selectedSquadId && (
+            <div className="mb-4 rounded-xl border bg-blue-50/50 p-3 space-y-2">
+              <div>
+                <p className="text-sm font-medium">Precargar pendientes para cuadrilla</p>
+                <p className="text-xs text-gray-600">
+                  Cargá IDs separados por coma o salto de línea. Se crearán como pendientes para hoy.
+                </p>
+              </div>
+              <textarea
+                className="w-full border rounded-xl px-3 py-2 text-sm min-h-24 bg-white"
+                value={preloadIdsInput}
+                onChange={(e) => setPreloadIdsInput(e.target.value)}
+                placeholder={"IPT-001\nIPT-002\nIPT-003"}
+              />
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={preloadInstallationsForSquad}
+                  disabled={savingPreload}
+                  className="rounded-lg bg-black text-white px-3 py-2 text-sm font-medium disabled:opacity-50"
+                >
+                  {savingPreload ? "Precargando..." : "Precargar pendientes"}
+                </button>
+                {preloadResultMessage && (
+                  <span className="text-xs text-green-700">{preloadResultMessage}</span>
+                )}
+              </div>
+            </div>
+          )}
+
+{selectedSquadId && (
             <div className="mb-4 rounded-xl border bg-gray-50 p-3 space-y-2">
               <div>
                 <p className="text-sm font-medium">Observación de cuadrilla</p>
@@ -1149,6 +1307,7 @@ const buildPdfLines = (rows: InstallationItem[], title: string) => {
               {filteredSelectedItems.map(({ it, diffMin, gapText }) => {
                 let alertLabel = "";
                 let alertClass = "";
+                const statusMeta = getWorkflowStatusMeta(it.workflowStatus);
 
                 if (diffMin >= 120) {
                   alertLabel = "DEMORA FUERTE";
@@ -1166,11 +1325,17 @@ const buildPdfLines = (rows: InstallationItem[], title: string) => {
                     }}
                     className={[
                       "text-sm border rounded-xl p-2.5 sm:p-3 transition-colors",
+                      statusMeta.rowClass,
                       highlightedInstallationId === it.id ? "bg-blue-50 border-blue-300" : "",
                     ].join(" ")}
                   >
                     <div className="flex items-center justify-between gap-2">
-                      <div className="font-medium text-sm">{it.idInstalacion}</div>
+                      <div className="flex items-center gap-2">
+                        <div className="font-medium text-sm">{it.idInstalacion}</div>
+                        <span className={`text-[11px] border rounded-full px-2 py-0.5 ${statusMeta.chipClass}`}>
+                          {statusMeta.label}
+                        </span>
+                      </div>
                       <div className="text-xs text-gray-500">{fmtTime(it.createdAt)}</div>
                     </div>
 
@@ -1217,6 +1382,11 @@ const buildPdfLines = (rows: InstallationItem[], title: string) => {
                       <>
                         {it.observaciones && (
                           <div className="text-gray-600 mt-1 text-xs sm:text-sm">{it.observaciones}</div>
+                        )}
+                        {it.resolutionComment && (
+                          <div className="text-xs sm:text-sm mt-1 border rounded-lg bg-white/90 px-2 py-1 text-gray-700">
+                            Resultado: {it.resolutionComment}
+                          </div>
                         )}
 
                         <div className="mt-2 flex flex-wrap items-center gap-2">
