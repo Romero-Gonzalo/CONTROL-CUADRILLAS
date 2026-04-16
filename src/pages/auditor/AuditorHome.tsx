@@ -20,6 +20,7 @@ import {
   deleteInstallation,
   updateInstallation,
 } from "../../services/installations.service";
+import { getReadableNowTimestamp, sendInstallationToMake } from "../../services/makeWebhook.service";
 
 type Squad = {
   id: string;
@@ -841,6 +842,38 @@ const startEdit = (item: InstallationItem) => {
         ids: idsToCreate,
         dayKey,
       });
+
+      if (idsToCreate.length > 0) {
+        const squadName =
+          squads.find((squad) => squad.id === selectedSquadId)?.name ?? selectedSquadId;
+        const auditUser = profile?.displayName || user.email || user.uid;
+
+        const makeResults = await Promise.allSettled(
+          idsToCreate.map((idInstalacion) =>
+            sendInstallationToMake({
+              fecha: getReadableNowTimestamp(),
+              cuadrilla: squadName,
+              idInstalacion,
+              observaciones: "",
+              usuario: auditUser,
+              dayKey,
+              estado: "PENDIENTE",
+              origen: "AUDITOR",
+            }),
+          ),
+        );
+
+        const failedMakeSubmissions = makeResults.filter(
+          (result) => result.status === "rejected",
+        ).length;
+
+        if (failedMakeSubmissions > 0) {
+          console.error("Error enviando algunas instalaciones precargadas al webhook de Make", {
+            failedMakeSubmissions,
+            total: idsToCreate.length,
+          });
+        }
+      }
 
       const skipped = uniqueIds.length - created;
       setPreloadResultMessage(
