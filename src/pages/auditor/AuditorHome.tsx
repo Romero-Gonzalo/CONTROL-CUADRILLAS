@@ -32,6 +32,7 @@ type InstallationItem = {
   idInstalacion: string;
   observaciones: string;
   squadId: string;
+  dayKey?: string;
   workflowStatus?: "PENDIENTE" | "SOLUCIONADO" | "NO_SOLUCIONADO" | "RECHAZADO";
   resolutionComment?: string;
   createdAt?: any;
@@ -45,6 +46,15 @@ type SquadObservation = {
   text: string;
 };
 type AlertLevel = "all" | "normal" | "delay" | "critical";
+const WORKFLOW_CUTOFF_DAY = "2026-04-16";
+
+function getEffectiveWorkflowStatus(item: InstallationItem): NonNullable<InstallationItem["workflowStatus"]> {
+  if (!item.workflowStatus && item.dayKey && item.dayKey <= WORKFLOW_CUTOFF_DAY) {
+    return "SOLUCIONADO";
+  }
+
+  return item.workflowStatus ?? "PENDIENTE";
+}
 
 function getAlertLevel(diffMin: number): Exclude<AlertLevel, "all"> {
   if (diffMin >= 120) return "critical";
@@ -590,12 +600,21 @@ useEffect(() => {
     };
 
     selectedList.forEach((it) => {
-      const key = (it.workflowStatus ?? "PENDIENTE") as keyof typeof stats;
+      const key = getEffectiveWorkflowStatus(it) as keyof typeof stats;
       stats[key] += 1;
     });
 
     return stats;
   }, [selectedList]);
+
+  const totalSolvedInstallations = useMemo(
+    () =>
+      installations.reduce(
+        (acc, it) => (getEffectiveWorkflowStatus(it) === "SOLUCIONADO" ? acc + 1 : acc),
+        0,
+      ),
+    [installations],
+  );
 
   useEffect(() => {
     if (!pendingScrollInstallationId) return;
@@ -1188,14 +1207,17 @@ const buildPdfLines = (rows: InstallationItem[], title: string) => {
           <div className="text-lg sm:text-xl font-bold">{dayKey}</div>
         </div>
         <div className="rounded-2xl border p-3 sm:p-4">
-          <div className="text-sm text-gray-500">Total instalaciones</div>
-          <div className="text-lg sm:text-xl font-bold">{installations.length}</div>
+          <div className="text-sm text-gray-500">Total instalaciones (solucionadas)</div>
+          <div className="text-lg sm:text-xl font-bold">{totalSolvedInstallations}</div>
         </div>
         <div className="rounded-2xl border p-3 sm:p-4">
           <div className="text-sm text-gray-500">Cuadrillas activas</div>
           <div className="text-lg sm:text-xl font-bold">{squads.length}</div>
         </div>
       </div>
+      <p className="order-1 sm:order-5 text-xs text-gray-500">
+        Nota: histórico sin estado hasta la fecha de corte se cuenta como solucionado.
+      </p>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6 order-2 sm:order-6">
         <div className="rounded-2xl border p-3 sm:p-4">
