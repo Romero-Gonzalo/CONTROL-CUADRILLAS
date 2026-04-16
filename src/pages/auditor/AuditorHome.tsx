@@ -305,6 +305,7 @@ const [rangeFrom, setRangeFrom] = useState(() => {
   const [savingPreload, setSavingPreload] = useState(false);
   const [preloadResultMessage, setPreloadResultMessage] = useState("");
   const installationRefs = useRef<Record<string, HTMLLIElement | null>>({});
+  const loadedIdsSectionRef = useRef<HTMLDivElement | null>(null);
 
   const dayKey = useMemo(() => dayInput, [dayInput]);
 
@@ -335,6 +336,15 @@ const [rangeFrom, setRangeFrom] = useState(() => {
     () => matchedInstallations.slice(0, 5),
     [matchedInstallations],
   );
+
+  function scrollToLoadedIdsSection() {
+    window.requestAnimationFrame(() => {
+      loadedIdsSectionRef.current?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
+    });
+  }
 
   useEffect(() => {
     const q = query(collection(db, "squads"), where("active", "==", true));
@@ -1108,9 +1118,10 @@ const buildPdfLines = (rows: InstallationItem[], title: string) => {
               <div className="rounded-lg border border-green-200 bg-green-50 px-3 py-2">
               <button
                 type="button"
-                onClick={() =>
-                  setWorkflowSortStatus((prev) => (prev === "SOLUCIONADO" ? null : "SOLUCIONADO"))
-                }
+                onClick={() => {
+                  setWorkflowSortStatus((prev) => (prev === "SOLUCIONADO" ? null : "SOLUCIONADO"));
+                  scrollToLoadedIdsSection();
+                }}
                 className={[
                   "w-full text-left rounded-lg",
                   workflowSortStatus === "SOLUCIONADO" ? "ring-2 ring-green-500 ring-offset-1" : "",
@@ -1124,11 +1135,12 @@ const buildPdfLines = (rows: InstallationItem[], title: string) => {
               <div className="rounded-lg border border-yellow-200 bg-yellow-50 px-3 py-2">
               <button
                 type="button"
-                onClick={() =>
+                onClick={() => {
                   setWorkflowSortStatus((prev) =>
                     prev === "NO_SOLUCIONADO" ? null : "NO_SOLUCIONADO",
-                  )
-                }
+                  );
+                  scrollToLoadedIdsSection();
+                }}
                 className={[
                   "w-full text-left rounded-lg",
                   workflowSortStatus === "NO_SOLUCIONADO" ? "ring-2 ring-yellow-500 ring-offset-1" : "",
@@ -1142,9 +1154,10 @@ const buildPdfLines = (rows: InstallationItem[], title: string) => {
               <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2">
               <button
                 type="button"
-                onClick={() =>
-                  setWorkflowSortStatus((prev) => (prev === "RECHAZADO" ? null : "RECHAZADO"))
-                }
+                onClick={() => {
+                  setWorkflowSortStatus((prev) => (prev === "RECHAZADO" ? null : "RECHAZADO"));
+                  scrollToLoadedIdsSection();
+                }}
                 className={[
                   "w-full text-left rounded-lg",
                   workflowSortStatus === "RECHAZADO" ? "ring-2 ring-red-500 ring-offset-1" : "",
@@ -1349,7 +1362,7 @@ const buildPdfLines = (rows: InstallationItem[], title: string) => {
           </div>
         </div>
 
-        <div className="rounded-2xl border p-3 sm:p-4 lg:col-span-2">
+        <div ref={loadedIdsSectionRef} className="rounded-2xl border p-3 sm:p-4 lg:col-span-2">
           <div className="flex items-end justify-between gap-3 mb-3">
             <div>
               <h2 className="font-semibold text-sm sm:text-base">{selectedSquadName || "Seleccioná una cuadrilla"}</h2>
