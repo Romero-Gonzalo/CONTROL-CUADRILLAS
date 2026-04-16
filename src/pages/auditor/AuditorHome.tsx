@@ -46,6 +46,7 @@ type SquadObservation = {
   text: string;
 };
 type AlertLevel = "all" | "normal" | "delay" | "critical";
+type WorkflowSortStatus = "SOLUCIONADO" | "NO_SOLUCIONADO" | "RECHAZADO";
 const WORKFLOW_CUTOFF_DAY = "2026-04-16";
 
 function getEffectiveWorkflowStatus(item: InstallationItem): NonNullable<InstallationItem["workflowStatus"]> {
@@ -274,6 +275,7 @@ export default function AuditorHome() {
   const [dayInput, setDayInput] = useState(() => getDayKey());
   const [searchId, setSearchId] = useState("");
   const [alertFilter, setAlertFilter] = useState<AlertLevel>("all");
+  const [workflowSortStatus, setWorkflowSortStatus] = useState<WorkflowSortStatus | null>(null);
 const [rangeFrom, setRangeFrom] = useState(() => {
     const d = new Date();
     d.setMonth(d.getMonth() - 2);
@@ -615,6 +617,23 @@ useEffect(() => {
     return selectedItemsWithGap.filter((row) => row.level === alertFilter);
   }, [alertFilter, selectedItemsWithGap]);
 
+  const displayedSelectedItems = useMemo(() => {
+    if (!workflowSortStatus) return filteredSelectedItems;
+
+    const prioritized: typeof filteredSelectedItems = [];
+    const others: typeof filteredSelectedItems = [];
+
+    filteredSelectedItems.forEach((row) => {
+      if (getEffectiveWorkflowStatus(row.it) === workflowSortStatus) {
+        prioritized.push(row);
+        return;
+      }
+      others.push(row);
+    });
+
+    return [...prioritized, ...others];
+  }, [filteredSelectedItems, workflowSortStatus]);
+
   const selectedStatusStats = useMemo(() => {
     const stats = {
       PENDIENTE: 0,
@@ -639,6 +658,12 @@ useEffect(() => {
       ),
     [installations],
   );
+
+  useEffect(() => {
+    if (!selectedSquadId) {
+      setWorkflowSortStatus(null);
+    }
+  }, [selectedSquadId]);
 
   useEffect(() => {
     if (!pendingScrollInstallationId) return;
@@ -1081,16 +1106,54 @@ const buildPdfLines = (rows: InstallationItem[], title: string) => {
                 <div className="text-sm font-semibold">{selectedStatusStats.PENDIENTE}</div>
               </div>
               <div className="rounded-lg border border-green-200 bg-green-50 px-3 py-2">
+              <button
+                type="button"
+                onClick={() =>
+                  setWorkflowSortStatus((prev) => (prev === "SOLUCIONADO" ? null : "SOLUCIONADO"))
+                }
+                className={[
+                  "w-full text-left rounded-lg",
+                  workflowSortStatus === "SOLUCIONADO" ? "ring-2 ring-green-500 ring-offset-1" : "",
+                ].join(" ")}
+                title="Ordenar priorizando solucionadas"
+              >
                 <div className="text-[11px] text-green-700">Solucionadas</div>
                 <div className="text-sm font-semibold text-green-800">{selectedStatusStats.SOLUCIONADO}</div>
+              </button>
               </div>
               <div className="rounded-lg border border-yellow-200 bg-yellow-50 px-3 py-2">
+              <button
+                type="button"
+                onClick={() =>
+                  setWorkflowSortStatus((prev) =>
+                    prev === "NO_SOLUCIONADO" ? null : "NO_SOLUCIONADO",
+                  )
+                }
+                className={[
+                  "w-full text-left rounded-lg",
+                  workflowSortStatus === "NO_SOLUCIONADO" ? "ring-2 ring-yellow-500 ring-offset-1" : "",
+                ].join(" ")}
+                title="Ordenar priorizando no solucionadas"
+              >
                 <div className="text-[11px] text-yellow-700">No solucionadas</div>
                 <div className="text-sm font-semibold text-yellow-800">{selectedStatusStats.NO_SOLUCIONADO}</div>
+              </button>
               </div>
               <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2">
+              <button
+                type="button"
+                onClick={() =>
+                  setWorkflowSortStatus((prev) => (prev === "RECHAZADO" ? null : "RECHAZADO"))
+                }
+                className={[
+                  "w-full text-left rounded-lg",
+                  workflowSortStatus === "RECHAZADO" ? "ring-2 ring-red-500 ring-offset-1" : "",
+                ].join(" ")}
+                title="Ordenar priorizando rechazadas"
+              >
                 <div className="text-[11px] text-red-700">Rechazadas</div>
                 <div className="text-sm font-semibold text-red-800">{selectedStatusStats.RECHAZADO}</div>
+              </button>
               </div>
             </div>
           )}
@@ -1355,11 +1418,11 @@ const buildPdfLines = (rows: InstallationItem[], title: string) => {
             </div>
           )}
 
-          {selectedSquadId && filteredSelectedItems.length === 0 ? (
+          {selectedSquadId && displayedSelectedItems.length === 0 ? (
             <p className="text-sm text-gray-500">No hay instalaciones para esta cuadrilla con el filtro elegido.</p>
           ) : (
             <ul className="space-y-1.5 sm:space-y-2">
-              {filteredSelectedItems.map(({ it, diffMin, gapText }) => {
+              {displayedSelectedItems.map(({ it, diffMin, gapText }) => {
                 let alertLabel = "";
                 let alertClass = "";
                 const statusMeta = getWorkflowStatusMeta(it.workflowStatus);
