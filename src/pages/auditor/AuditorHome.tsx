@@ -32,6 +32,8 @@ type InstallationItem = {
   idInstalacion: string;
   observaciones: string;
   squadId: string;
+  workflowStatus?: "PENDIENTE" | "SOLUCIONADO" | "NO_SOLUCIONADO" | "RECHAZADO";
+  resolutionComment?: string;
   createdAt?: any;
 };
 type DayObservation = {
@@ -48,6 +50,35 @@ function getAlertLevel(diffMin: number): Exclude<AlertLevel, "all"> {
   if (diffMin >= 120) return "critical";
   if (diffMin >= 60) return "delay";
   return "normal";
+}
+
+function getWorkflowStatusMeta(status?: InstallationItem["workflowStatus"]) {
+  switch (status) {
+    case "SOLUCIONADO":
+      return {
+        label: "Solucionado",
+        chipClass: "bg-green-50 border-green-200 text-green-700",
+        rowClass: "border-green-200 bg-green-50/30",
+      };
+    case "NO_SOLUCIONADO":
+      return {
+        label: "No solucionado",
+        chipClass: "bg-yellow-50 border-yellow-200 text-yellow-800",
+        rowClass: "border-yellow-200 bg-yellow-50/30",
+      };
+    case "RECHAZADO":
+      return {
+        label: "Rechazado",
+        chipClass: "bg-red-50 border-red-200 text-red-700",
+        rowClass: "border-red-200 bg-red-50/30",
+      };
+    default:
+      return {
+        label: "Pendiente",
+        chipClass: "bg-gray-50 border-gray-200 text-gray-700",
+        rowClass: "",
+      };
+  }
 }
 
 function normalizeInstallationId(value: string) {
@@ -550,6 +581,22 @@ useEffect(() => {
     return selectedItemsWithGap.filter((row) => row.level === alertFilter);
   }, [alertFilter, selectedItemsWithGap]);
 
+  const selectedStatusStats = useMemo(() => {
+    const stats = {
+      PENDIENTE: 0,
+      SOLUCIONADO: 0,
+      NO_SOLUCIONADO: 0,
+      RECHAZADO: 0,
+    };
+
+    selectedList.forEach((it) => {
+      const key = (it.workflowStatus ?? "PENDIENTE") as keyof typeof stats;
+      stats[key] += 1;
+    });
+
+    return stats;
+  }, [selectedList]);
+
   useEffect(() => {
     if (!pendingScrollInstallationId) return;
 
@@ -983,6 +1030,27 @@ const buildPdfLines = (rows: InstallationItem[], title: string) => {
             <p className="text-sm font-medium">Observación general del día</p>
             <p className="text-xs text-gray-500">Ej: lluvia, falta de material o cualquier incidencia general.</p>
           </div>
+
+          {selectedSquadId && (
+            <div className="mb-4 grid grid-cols-2 sm:grid-cols-4 gap-2">
+              <div className="rounded-lg border bg-gray-50 px-3 py-2">
+                <div className="text-[11px] text-gray-500">Pendientes</div>
+                <div className="text-sm font-semibold">{selectedStatusStats.PENDIENTE}</div>
+              </div>
+              <div className="rounded-lg border border-green-200 bg-green-50 px-3 py-2">
+                <div className="text-[11px] text-green-700">Solucionadas</div>
+                <div className="text-sm font-semibold text-green-800">{selectedStatusStats.SOLUCIONADO}</div>
+              </div>
+              <div className="rounded-lg border border-yellow-200 bg-yellow-50 px-3 py-2">
+                <div className="text-[11px] text-yellow-700">No solucionadas</div>
+                <div className="text-sm font-semibold text-yellow-800">{selectedStatusStats.NO_SOLUCIONADO}</div>
+              </div>
+              <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2">
+                <div className="text-[11px] text-red-700">Rechazadas</div>
+                <div className="text-sm font-semibold text-red-800">{selectedStatusStats.RECHAZADO}</div>
+              </div>
+            </div>
+          )}
           <textarea
             className="w-full border rounded-xl px-3 py-2 text-sm min-h-24"
             value={dayObservation}
@@ -1239,6 +1307,7 @@ const buildPdfLines = (rows: InstallationItem[], title: string) => {
               {filteredSelectedItems.map(({ it, diffMin, gapText }) => {
                 let alertLabel = "";
                 let alertClass = "";
+                const statusMeta = getWorkflowStatusMeta(it.workflowStatus);
 
                 if (diffMin >= 120) {
                   alertLabel = "DEMORA FUERTE";
@@ -1256,11 +1325,17 @@ const buildPdfLines = (rows: InstallationItem[], title: string) => {
                     }}
                     className={[
                       "text-sm border rounded-xl p-2.5 sm:p-3 transition-colors",
+                      statusMeta.rowClass,
                       highlightedInstallationId === it.id ? "bg-blue-50 border-blue-300" : "",
                     ].join(" ")}
                   >
                     <div className="flex items-center justify-between gap-2">
-                      <div className="font-medium text-sm">{it.idInstalacion}</div>
+                      <div className="flex items-center gap-2">
+                        <div className="font-medium text-sm">{it.idInstalacion}</div>
+                        <span className={`text-[11px] border rounded-full px-2 py-0.5 ${statusMeta.chipClass}`}>
+                          {statusMeta.label}
+                        </span>
+                      </div>
                       <div className="text-xs text-gray-500">{fmtTime(it.createdAt)}</div>
                     </div>
 
@@ -1307,6 +1382,11 @@ const buildPdfLines = (rows: InstallationItem[], title: string) => {
                       <>
                         {it.observaciones && (
                           <div className="text-gray-600 mt-1 text-xs sm:text-sm">{it.observaciones}</div>
+                        )}
+                        {it.resolutionComment && (
+                          <div className="text-xs sm:text-sm mt-1 border rounded-lg bg-white/90 px-2 py-1 text-gray-700">
+                            Resultado: {it.resolutionComment}
+                          </div>
                         )}
 
                         <div className="mt-2 flex flex-wrap items-center gap-2">
